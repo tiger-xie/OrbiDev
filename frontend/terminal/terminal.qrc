@@ -1,0 +1,13 @@
+<RCC>
+  <qresource prefix="/terminal">
+    <file>index.html</file>
+    <file>terminal.css</file>
+    <file>terminal.js</file>
+    <file>self-test.js</file>
+    <file>vendor/xterm.js</file>
+    <file>vendor/xterm.css</file>
+    <file>vendor/xterm-addon-fit.js</file>
+    <file>vendor/xterm-LICENSE.txt</file>
+    <file>vendor/fit-LICENSE.txt</file>
+  </qresource>
+</RCC>

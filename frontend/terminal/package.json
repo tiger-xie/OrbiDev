@@ -1,0 +1,10 @@
+{
+  "name": "radmanager-terminal-poc",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": { "vendor": "node vendor.cjs", "verify": "node vendor.cjs --check" },
+  "dependencies": {
+    "xterm": "4.19.0",
+    "xterm-addon-fit": "0.5.0"
+  }
+}
