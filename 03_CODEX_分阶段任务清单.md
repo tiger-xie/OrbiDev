@@ -49,6 +49,8 @@
 
 **边界**：不在软件中集成代理、改写家庭主路由或实现账号地区规避功能。
 
+**当前进度**：用户确认当前为公司电脑，并明确将 M0-03 延期，继续本地开发；后续 Claude 终端可先在本机验证。仅完成本机 Tailscale 只读检查，跨端网络尚未验收。见 [M0-03 网络预研记录](docs/M0-03_家庭网络预研.md)。
+
 ### TASK-M1-01 — CMake 工程骨架
 
 **目标**：`RemoteClient.exe`、`RemoteAgent.exe`、`RADCore`、`RADProtocol`、`RADTests` 可编译；引入 CTest/Qt Test。
@@ -60,6 +62,8 @@
 **给 Codex 的指令**：
 
 > 只执行 TASK-M1-01。创建设计文档所规定的基础目录、CMake targets、最小启动入口、Mock 接口和测试。不要实现真实网络、ConPTY 或界面逻辑。确保两 EXE 和测试工程编译成功。
+
+**当前记录（2026-10-17）**：M1-01 骨架已实现；全新目录 Debug/Release 编译、各 10/10 CTest 和同机独立部署烟测通过，待审查。未执行人工 VS 断点验收；Debug WebEngine 退出诊断及部署限制见 [M1-01 验证记录](docs/M1-01_工程骨架与验证.md)。模型及 Mock 接口留给 M1-02，整个 M1 尚未完成。
 
 ### TASK-M1-02 — 模型与接口定义
 

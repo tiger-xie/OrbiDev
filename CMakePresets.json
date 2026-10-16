@@ -1,0 +1,24 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [{
+    "name": "local-msvc",
+    "displayName": "Qt 5.15.2 / VS 2022 x64",
+    "generator": "Visual Studio 17 2022",
+    "architecture": "x64",
+    "toolset": "v143",
+    "binaryDir": "${sourceDir}/build-local",
+    "cacheVariables": {
+      "CMAKE_PREFIX_PATH": "$env{QTDIR}",
+      "RAD_ENABLE_ANALYSIS": "ON"
+    }
+  }],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "local-msvc", "configuration": "Debug" },
+    { "name": "release", "configurePreset": "local-msvc", "configuration": "Release" }
+  ],
+  "testPresets": [
+    { "name": "debug", "configurePreset": "local-msvc", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "release", "configurePreset": "local-msvc", "configuration": "Release", "output": { "outputOnFailure": true } }
+  ]
+}
