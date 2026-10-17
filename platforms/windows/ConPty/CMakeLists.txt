@@ -1,0 +1,5 @@
+add_library(RADWindowsTerminal STATIC WinConPtyBackend.cpp WinConPtyBackend.h)
+rad_configure_target(RADWindowsTerminal)
+target_include_directories(RADWindowsTerminal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(RADWindowsTerminal PUBLIC RADCore PRIVATE RADConPtyProcess)
+target_compile_definitions(RADWindowsTerminal PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)

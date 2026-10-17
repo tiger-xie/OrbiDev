@@ -48,6 +48,25 @@ void configureConsole()
                "SetConsoleMode(output)");
 }
 
+void spawnTestChild()
+{
+    std::wstring executable(32768, L'\0');
+    const DWORD length =
+        GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    checkWin32(length != 0 && length < executable.size(), "GetModuleFileNameW");
+    executable.resize(length);
+    std::wstring command = L"\"" + executable + L"\" --sleep-child";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION child{};
+    checkWin32(CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                              nullptr, nullptr, &startup, &child),
+               "CreateProcessW(child)");
+    CloseHandle(child.hThread);
+    CloseHandle(child.hProcess);
+    writeOutput("[CHILD]" + std::to_string(child.dwProcessId) + "\r\n");
+}
+
 std::optional<int> execute(std::string_view command)
 {
     if (command.starts_with("echo "))
@@ -80,6 +99,24 @@ std::optional<int> execute(std::string_view command)
         writeOutput("[PAUSED]\r\n");
         Sleep(30000);
         writeOutput("[RESUMED]\r\n");
+    }
+    else if (command == "tree")
+    {
+        spawnTestChild();
+    }
+    else if (command.starts_with("flood "))
+    {
+        const std::string marker(command.substr(6));
+        for (int index = 0; index < 24000; ++index)
+        {
+            writeOutput("[" + marker + "]" + std::to_string(index) + ":" + std::string(80, 'x') + "\r\n");
+        }
+        writeOutput("[DONE:" + marker + "]\r\n");
+    }
+    else if (command == "fail-tail")
+    {
+        writeOutput("[FAIL_TAIL]中文尾部\r\n");
+        return 23;
     }
     else if (command == "exit")
     {
@@ -166,10 +203,40 @@ int run()
 
 } // 匿名命名空间
 
-int main()
+int wmain(int argc, wchar_t **argv)
 {
     try
     {
+        if (argc > 1 && std::wstring_view(argv[1]) == L"--sleep-child")
+        {
+            Sleep(120000);
+            return 0;
+        }
+        if (argc > 1 && std::wstring_view(argv[1]) == L"--report-args")
+        {
+            configureConsole();
+            constexpr char hex[] = "0123456789abcdef";
+            for (int index = 2; index < argc; ++index)
+            {
+                const int length = static_cast<int>(std::wstring_view(argv[index]).size());
+                std::string bytes(static_cast<std::size_t>(length) * 4, '\0');
+                const int size =
+                    length == 0
+                        ? 0
+                        : WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argv[index], length,
+                                              bytes.data(), static_cast<int>(bytes.size()), nullptr, nullptr);
+                checkWin32(length == 0 || size > 0, "WideCharToMultiByte(arguments)");
+                bytes.resize(static_cast<std::size_t>(size));
+                std::string encoded;
+                for (const unsigned char byte : bytes)
+                {
+                    encoded += hex[byte >> 4];
+                    encoded += hex[byte & 15];
+                }
+                writeOutput("[ARG" + std::to_string(index - 2) + "]" + encoded + "[END]\r\n");
+            }
+            return 0;
+        }
         return run();
     }
     catch (const std::exception &error)

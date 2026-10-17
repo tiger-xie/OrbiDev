@@ -12,7 +12,7 @@
 | RADSessionContractTests | tests/unit | Qt Test；值校验及内存替身的接口契约，不代表生产会话实现 |
 | M0 POC | tools/TerminalPoc、platforms/windows/ConPty、tests/fixtures | 独立保留技术验证，不被产品 Client/Agent 链接 |
 
-根 CMake 的 RAD_BUILD_APPLICATIONS、RAD_BUILD_CONPTY_POC、RAD_BUILD_TERMINAL_POC 分别控制产品骨架及两个 POC，默认均开启。关闭全部 POC 后，产品骨架无需下载 ConPTY 运行库。关闭产品骨架和终端 POC 后，M0-01 仍可不依赖 Qt 构建。
+根 CMake 的 RAD_BUILD_APPLICATIONS、RAD_BUILD_CONPTY_POC、RAD_BUILD_TERMINAL_POC 分别控制产品骨架及两个 POC，默认均开启。M2 新增 RAD_BUILD_WINDOWS_BACKEND，默认跟随产品骨架开启；仅构建不含后端的骨架时还需关闭此开关，才无需下载 ConPTY 运行库。关闭产品骨架、Windows 后端和终端 POC 后，M0-01 仍可不依赖 Qt 构建。
 
 依赖方向为 apps → core / protocol。Agent 不依赖 Widgets、WebEngine、WebChannel；Client 不直接包含 Win32 或 Provider 实现。M1-02 已定义会话、后端和 Provider 的模型/抽象接口，尚未接入应用入口。
 
@@ -24,7 +24,7 @@
 
 ## 本轮计划调整
 
-用户确认当前电脑为公司端，并已准备家庭测试电脑，Claude CLI 可用、Tailscale 已连接（用户提供证据，非代理跨端验证）。后续优先在该机联调远程 CLI；NAS 不参与终端链路，保留未来 Git 托管规划。正式出口/Fail Closed 与 NAS 验收延期，双端路径和 Agent 端口仍待验证。项目按原里程碑继续开发，本轮仅调整文档。
+用户确认当前电脑为公司端，并已准备家庭测试电脑，Claude CLI 可用、Tailscale 已连接（用户提供证据，非代理跨端验证）。后续优先在该机联调远程 CLI；NAS 不参与终端链路，保留未来 Git 托管规划。正式出口/Fail Closed 与 NAS 验收延期，双端路径和 Agent 端口仍待验证。项目按原里程碑继续开发，此前已提交网络规划文档；当前实现范围为 M2-01 后端。
 
 ## 运行与错误边界
 
@@ -34,3 +34,11 @@
 - M0 的 detach、持久化、鉴权等约束不因建立工程骨架而改变。
 
 构建、部署和验证记录见 [M1-01 工程骨架](M1-01_工程骨架与验证.md)。
+
+## M2-01 Windows 终端后端
+
+RADWindowsTerminal 实现 ITerminalBackend，依赖 RADCore 与纯 Win32 的 RADConPtyProcess；原 RADConPtyPoc 复用同一引擎。应用入口尚未链接后端，SessionManager 留给 M2-02。
+
+每个会话拥有生命周期线程及管道读写线程，控制线程只提交请求与消费合并通知。输出有界且显式报告丢弃，finished 在关闭与尾部输出归并后发出。白名单是启动目录授权，不是进程文件系统沙箱。
+
+源码链路、配置与验收见 [M2-01 Windows 后端](M2-01_Windows终端后端.md) 与 [ADR-014](ADR/014_Windows终端后端.md)。

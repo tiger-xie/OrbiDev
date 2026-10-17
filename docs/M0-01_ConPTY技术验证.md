@@ -14,7 +14,7 @@
 |---|---|---|
 | [CMakeLists.txt](../CMakeLists.txt) | 构建目标、CTest | 编译、严格告警、可选静态分析与六项测试 |
 | [ConPtySession.h](../platforms/windows/ConPty/ConPtySession.h) | `rad::poc::ConPtySession` | POC API 和线程、错误、容量契约 |
-| [ConPtySession.cpp](../platforms/windows/ConPty/ConPtySession.cpp) | `start`、`writeQueuedInput`、`readOutput`、`cleanup` | ConPTY、进程树、双向管道与资源生命周期 |
+| [ConPtyProcess.cpp](../platforms/windows/ConPty/ConPtyProcess.cpp) | `start`、`writeQueuedInput`、`readOutput`、`cleanup` | ConPTY、进程树、双向管道与资源生命周期 |
 | [FakeCli](../tests/fixtures/FakeCli/main.cpp) | `run`、`execute` | 可重复的控制台输入输出夹具 |
 | [集成测试](../tests/integration/ConPtyPocTests.cpp) | `interaction` 等场景 | 用真实 ConPTY 启动同目录 FakeCli |
 | [系统探针](../tools/ConPtyOsProbe.cpp) | `createAndCloseConsole` | 不启动子进程、不使用封装，独立复现系统句柄增长 |
@@ -58,7 +58,7 @@ FakeCli 是受控夹具，非完整 VT 解析器。键盘与字体最终视觉�
 
 ## 4. 构建与复现
 
-后续已接入 M0-02，当前根工程默认构建 Qt 演示；若只复现本节 M0-01，请在下列配置命令末尾添加 `-DRAD_BUILD_TERMINAL_POC=OFF -DRAD_BUILD_APPLICATIONS=OFF`。完整工程构建改按 [M0-02 说明](M0-02_Qt终端技术验证.md) 传入 Qt 路径。
+后续已接入 M0-02，当前根工程默认构建 Qt 演示；若只复现本节 M0-01，请在下列配置命令末尾添加 `-DRAD_BUILD_TERMINAL_POC=OFF -DRAD_BUILD_APPLICATIONS=OFF -DRAD_BUILD_WINDOWS_BACKEND=OFF`。完整工程构建改按 [M0-02 说明](M0-02_Qt终端技术验证.md) 传入 Qt 路径。
 
 从仓库根目录在 PowerShell 执行；下列别名只在当前会话生效，不修改全局环境。本轮刻意使用含中文和空格的构建目录验证进程路径处理。
 
