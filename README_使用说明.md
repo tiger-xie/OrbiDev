@@ -32,3 +32,7 @@ M1-02 已定义核心模型、Provider/终端/会话管理接口，测试入口�
 ## M2-01 后端实现
 
 Windows ConPTY 后端与真实 FakeCli 集成测试见 [M2-01 说明](docs/M2-01_Windows终端后端.md)。Client/Agent 仍未接入真实会话，远程联调需后续会话管理与协议阶段。
+
+## M2-02 本地会话管理
+
+SessionManager 提供创建、查询、附加/分离、控制权租约和显式终止，测试入口见 [M2-02 说明](docs/M2-02_SessionManager.md)。已接入真实后端的集成测试；产品界面和网络入口仍待后续任务。

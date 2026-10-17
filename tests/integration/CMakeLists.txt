@@ -14,3 +14,15 @@ foreach(scenario integration argumentsAndTail validation lifecycleStress concurr
     set_tests_properties(backend.${scenario} PROPERTIES TIMEOUT 90 RUN_SERIAL TRUE)
 endforeach()
 set_tests_properties(backend.lifecycleStress PROPERTIES TIMEOUT 180)
+
+add_executable(SessionManagerIntegrationTests SessionManagerIntegrationTests.cpp)
+rad_configure_target(SessionManagerIntegrationTests)
+target_link_libraries(SessionManagerIntegrationTests PRIVATE RADWindowsTerminal Qt5::Test)
+add_dependencies(SessionManagerIntegrationTests FakeCli WinConPtyBackendTestsRuntime)
+# 与后端测试共用输出目录和运行库部署目标，避免并行复制同一文件。
+add_test(NAME session.integration COMMAND ${CMAKE_COMMAND} -E env
+    "PATH=${RAD_QT_BIN};$ENV{PATH}"
+    "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
+    $<TARGET_FILE:SessionManagerIntegrationTests>
+    -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/session-manager-integration.xml,junitxml")
+set_tests_properties(session.integration PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)

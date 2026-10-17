@@ -8,6 +8,9 @@
     "architecture": "x64",
     "toolset": "v143",
     "binaryDir": "${sourceDir}/build-local",
+    "environment": {
+      "PATH": "$env{QTDIR}/bin;$penv{PATH}"
+    },
     "cacheVariables": {
       "CMAKE_PREFIX_PATH": "$env{QTDIR}",
       "RAD_ENABLE_ANALYSIS": "ON"

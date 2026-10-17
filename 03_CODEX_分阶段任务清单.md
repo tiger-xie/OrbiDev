@@ -87,6 +87,8 @@
 
 **验收**：测试可证明 detach 不 kill、terminate 显式生效、不同 session 输入互不串扰。
 
+**当前记录（2026-10-17）**：SessionManager 已实现创建/查询、独立订阅、单写者租约、并发限制和显式终止。新增 9 个单元测试方法及 1 个真实三会话集成方法 Debug/Release 均通过；Release 全套 20/20 通过。已验证全部分离后继续运行、同 ID 重附加与输入隔离。详见 [M2-02 说明](docs/M2-02_SessionManager.md)。实现待用户审查；未进入 M3，未接入远程网络或真实 Claude。
+
 ### TASK-M3-01 — 协议 DTO 与编解码
 
 **目标**：实现 RADP/1 JSON envelope、二进制帧、UUID 校验、版本协商、最大帧大小、错误协议。

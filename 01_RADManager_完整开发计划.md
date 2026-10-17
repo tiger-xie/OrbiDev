@@ -470,7 +470,7 @@ RADManager/
 | M8：发布版 | 打包、配置迁移、部署手册、兼容测试 | 可在家/公司部署并回滚 |
 | M9（可选 V1.1） | Git Worktree、Codex Provider、原生 Claude 后台会话 | 不修改 core 公共接口即可扩展 |
 
-当前实现记录（2026-10-17）：M2-01 已新增独立 Windows 终端后端及真实 FakeCli 集成测试，详见 [M2-01 说明](docs/M2-01_Windows终端后端.md)。SessionManager、关闭客户端后的持续运行和远程会话仍待后续任务，不能据此将整个 M2 标为通过。
+当前实现记录（2026-10-17）：M2-01 Windows 后端与 M2-02 SessionManager 已实现。真实三会话验证全部 detach 后继续运行、同 ID 重附加、显式终止及输入隔离；Release 全套 20/20 通过，详见 [M2-02 说明](docs/M2-02_SessionManager.md)。M2 实现待用户审查，产品客户端关闭/网络断线的端到端验证仍在后续任务，不把本地 detach 测试视为远程验收。
 
 ## 15. 测试矩阵
 

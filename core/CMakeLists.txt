@@ -12,3 +12,5 @@ target_sources(RADCore PRIVATE
     terminal/ITerminalBackend.h
     provider/IProviderAdapter.h
     session/ISessionManager.h)
+
+target_sources(RADCore PRIVATE session/SessionManager.h session/SessionManager.cpp)

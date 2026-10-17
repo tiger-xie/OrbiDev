@@ -4,7 +4,7 @@
 
 | 目标 | 路径 | 依赖及职责 |
 |---|---|---|
-| RADCore | core/model、core/terminal、core/provider、core/session | QtCore；编译基线、会话值模型、错误结果及抽象接口，不包含平台实现或 UI |
+| RADCore | core/model、core/terminal、core/provider、core/session | QtCore；编译基线、会话值模型、错误结果、抽象接口及 SessionManager，不包含平台实现或 UI |
 | RADProtocol | core/protocol | 协议主版本常量；不包含编解码、网络或 Qt GUI |
 | RemoteClient | apps/RemoteClient | RADCore、RADProtocol、Qt Widgets/WebEngineWidgets；最小本地启动页和部署烟测 |
 | RemoteAgent | apps/RemoteAgent | RADCore、RADProtocol、QtCore/Sql；启动说明及 SQLite 内存库烟测，不监听网络 |
@@ -24,7 +24,7 @@
 
 ## 本轮计划调整
 
-用户确认当前电脑为公司端，并已准备家庭测试电脑，Claude CLI 可用、Tailscale 已连接（用户提供证据，非代理跨端验证）。后续优先在该机联调远程 CLI；NAS 不参与终端链路，保留未来 Git 托管规划。正式出口/Fail Closed 与 NAS 验收延期，双端路径和 Agent 端口仍待验证。项目按原里程碑继续开发，此前已提交网络规划文档；当前实现范围为 M2-01 后端。
+用户确认当前电脑为公司端，并已准备家庭测试电脑，Claude CLI 可用、Tailscale 已连接（用户提供证据，非代理跨端验证）。后续优先在该机联调远程 CLI；NAS 不参与终端链路，保留未来 Git 托管规划。正式出口/Fail Closed 与 NAS 验收延期，双端路径和 Agent 端口仍待验证。项目按原里程碑继续开发，此前已提交网络规划文档；当前实现范围已扩展至 M2-02 本地会话管理。
 
 ## 运行与错误边界
 
@@ -37,8 +37,16 @@
 
 ## M2-01 Windows 终端后端
 
-RADWindowsTerminal 实现 ITerminalBackend，依赖 RADCore 与纯 Win32 的 RADConPtyProcess；原 RADConPtyPoc 复用同一引擎。应用入口尚未链接后端，SessionManager 留给 M2-02。
+RADWindowsTerminal 实现 ITerminalBackend，依赖 RADCore 与纯 Win32 的 RADConPtyProcess；原 RADConPtyPoc 复用同一引擎。应用入口尚未链接后端；M2-02 已在独立集成测试中组合 SessionManager 与此后端。
 
 每个会话拥有生命周期线程及管道读写线程，控制线程只提交请求与消费合并通知。输出有界且显式报告丢弃，finished 在关闭与尾部输出归并后发出。白名单是启动目录授权，不是进程文件系统沙箱。
 
 源码链路、配置与验收见 [M2-01 Windows 后端](M2-01_Windows终端后端.md) 与 [ADR-014](ADR/014_Windows终端后端.md)。
+
+## M2-02 本地会话管理
+
+SessionManager 位于 core/session，实现 ISessionManager，只依赖 QtCore 与 Provider/后端抽象。可信构造配置提供静态 Provider、工作区 ACL 及后端工厂；平台类型仅在组合方与集成测试出现。无需新增层级、依赖或网络接口。
+
+管理器独占后端，finished 前归并尾部，随后释放后端，保留有限元数据与历史。detach 只解除订阅和写权；默认 30 秒单写者租约到期降为只读，输入、resize 和原写者重复附加可续租。每订阅独立游标、合并通知和截断报告；活跃会话与终态保留数量分别限制。
+
+Agent 应用入口仍是骨架，静态 ACL 不等于已实现网络认证。详见 [SessionManager 流程与验收](M2-02_SessionManager.md) 和 [ADR-015](ADR/015_SessionManager与控制权租约.md)。

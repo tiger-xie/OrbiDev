@@ -7,6 +7,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
+#include <Windows.h>
 #include <cstdio>
 
 namespace
@@ -56,6 +57,12 @@ bool verifySqlite()
 
 int main(int argc, char *argv[])
 {
+    // 日志按 UTF-8 输出；仅在附有控制台时设置显示编码，重定向仍保留 UTF-8 字节。
+    if (GetConsoleOutputCP() != 0 && !SetConsoleOutputCP(CP_UTF8))
+    {
+        std::fprintf(stderr, "Unable to configure UTF-8 console output: %lu\n", GetLastError());
+        return 1;
+    }
     QCoreApplication application(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("RemoteAgent"));
     QCommandLineParser parser;
