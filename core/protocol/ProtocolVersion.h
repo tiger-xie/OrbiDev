@@ -2,6 +2,7 @@
 
 namespace rad
 {
-// 规划中的 RADP 主版本；M1-01 仅验证链接，不实现编解码或版本协商。
+// 当前 RADP 主版本，与编解码和版本协商使用同一版本。
+inline constexpr int kProtocolVersion = 1;
 int protocolVersion();
 }

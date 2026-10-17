@@ -4,6 +4,6 @@ namespace rad
 {
 int protocolVersion()
 {
-    return 1;
+    return kProtocolVersion;
 }
 }

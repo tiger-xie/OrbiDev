@@ -5,7 +5,7 @@
 | 目标 | 路径 | 依赖及职责 |
 |---|---|---|
 | RADCore | core/model、core/terminal、core/provider、core/session | QtCore；编译基线、会话值模型、错误结果、抽象接口及 SessionManager，不包含平台实现或 UI |
-| RADProtocol | core/protocol | 协议主版本常量；不包含编解码、网络或 Qt GUI |
+| RADProtocol | core/protocol | QtCore；RADP/1 DTO、JSON/二进制编解码与校验；不包含网络、会话实现或 Qt GUI |
 | RemoteClient | apps/RemoteClient | RADCore、RADProtocol、Qt Widgets/WebEngineWidgets；最小本地启动页和部署烟测 |
 | RemoteAgent | apps/RemoteAgent | RADCore、RADProtocol、QtCore/Sql；启动说明及 SQLite 内存库烟测，不监听网络 |
 | RADTests | tests/unit | Qt Test；验证加载的 Qt 版本、位数、语言标准及库目标可链接 |
@@ -50,3 +50,9 @@ SessionManager 位于 core/session，实现 ISessionManager，只依赖 QtCore �
 管理器独占后端，finished 前归并尾部，随后释放后端，保留有限元数据与历史。detach 只解除订阅和写权；默认 30 秒单写者租约到期降为只读，输入、resize 和原写者重复附加可续租。每订阅独立游标、合并通知和截断报告；活跃会话与终态保留数量分别限制。
 
 Agent 应用入口仍是骨架，静态 ACL 不等于已实现网络认证。详见 [SessionManager 流程与验收](M2-02_SessionManager.md) 和 [ADR-015](ADR/015_SessionManager与控制权租约.md)。
+
+## M3-01 协议边界
+
+RADProtocol 使用独立协议 DTO 与同步无状态编解码函数，仅依赖 QtCore，不依赖 RADCore。JSON 和二进制消息上限均为 64 KiB，收发双向验证；固定公开错误不透传系统详情。语法解码、版本协商、会话存在性与授权分开，不将解析成功视为认证成功。
+
+应用入口尚未调用协议库执行远程操作；WebSocket、认证和路由留给 M3-02。字段与源码入口见 [M3-01 说明](M3-01_协议编解码.md) 和 [ADR-016](ADR/016_RADP1协议边界.md)。

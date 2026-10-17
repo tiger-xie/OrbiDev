@@ -14,3 +14,6 @@ target_sources(RADCore PRIVATE
     session/ISessionManager.h)
 
 target_sources(RADCore PRIVATE session/SessionManager.h session/SessionManager.cpp)
+
+target_sources(RADProtocol PRIVATE protocol/ProtocolCodec.h protocol/ProtocolCodec.cpp)
+target_link_libraries(RADProtocol PUBLIC Qt5::Core)

@@ -79,7 +79,7 @@
 
 **验收**：连续创建/结束 100 次 FakeCli 无句柄泄漏或崩溃；3 并发高输出无互相阻塞。
 
-**当前记录（2026-10-17）**：WinConPtyBackend 已实现；Debug/Release 后端 7/7 通过，预热后 101 次真实进程严格句柄等量、3 并发及进程树清理通过。全套回归的旧 WebEngine POC 存在超时，Release 单独复跑通过、Debug 仍超时，不标记 Debug 全套通过。详见 [M2-01 说明](docs/M2-01_Windows终端后端.md)。当前实现待用户审查；未进入 M2-02。
+**当前记录（2026-10-17）**：WinConPtyBackend 已实现；Debug/Release 后端 7/7 通过，预热后 101 次真实进程严格句柄等量、3 并发及进程树清理通过。全套回归的旧 WebEngine POC 存在超时，Release 单独复跑通过、Debug 仍超时，不标记 Debug 全套通过。详见 [M2-01 说明](docs/M2-01_Windows终端后端.md)。用户已批准继续 M2-02；M2-01 已提交为 `9df7806`。
 
 ### TASK-M2-02 — SessionManager
 
@@ -87,13 +87,15 @@
 
 **验收**：测试可证明 detach 不 kill、terminate 显式生效、不同 session 输入互不串扰。
 
-**当前记录（2026-10-17）**：SessionManager 已实现创建/查询、独立订阅、单写者租约、并发限制和显式终止。新增 9 个单元测试方法及 1 个真实三会话集成方法 Debug/Release 均通过；Release 全套 20/20 通过。已验证全部分离后继续运行、同 ID 重附加与输入隔离。详见 [M2-02 说明](docs/M2-02_SessionManager.md)。实现待用户审查；未进入 M3，未接入远程网络或真实 Claude。
+**当前记录（2026-10-17）**：SessionManager 已实现创建/查询、独立订阅、单写者租约、并发限制和显式终止。新增 9 个单元测试方法及 1 个真实三会话集成方法 Debug/Release 均通过；Release 全套 20/20 通过。已验证全部分离后继续运行、同 ID 重附加与输入隔离。详见 [M2-02 说明](docs/M2-02_SessionManager.md)。用户已批准提交并继续后续任务；M2-02 与调试修复已提交为 `1991340`。未接入远程网络或真实 Claude。
 
 ### TASK-M3-01 — 协议 DTO 与编解码
 
 **目标**：实现 RADP/1 JSON envelope、二进制帧、UUID 校验、版本协商、最大帧大小、错误协议。
 
 **验收**：单元/模糊输入测试覆盖非法长度、损坏包、错误版本、不存在 session。
+
+**当前记录（2026-10-17）**：RADP/1 DTO、JSON/二进制编解码、UUID/版本/帧大小校验、安全错误及独立会话存在性检查已实现；11 个测试方法与 3000 轮定种子变异输入 Debug/Release 均通过。详见 [M3-01 说明](docs/M3-01_协议编解码.md)。当前工作区实现待审查，尚未进入 M3-02，不包含网络监听与身份认证。
 
 ### TASK-M3-02 — Agent WebSocket Server
 

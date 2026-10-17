@@ -291,6 +291,8 @@ Claude Code 文档现有 `claude --bg`、`claude agents --json` 和 `claude atta
 
 ## 8. 通信协议（RADP/1）
 
+**M3-01 实施记录（2026-10-17）**：已实现独立协议 DTO 和同步编解码，固定 34 字节二进制头、64 KiB 总帧上限及安全错误，Debug/Release 协议测试通过。下列为初始协议草案；准确消息集合、严格字段规则及当前验证边界见 [M3-01 说明](docs/M3-01_协议编解码.md) 和 [ADR-016](docs/ADR/016_RADP1协议边界.md)。WebSocket、鉴权及路由留给 M3-02，尚未完成远程联调。
+
 通信模型：Qt WebSocket，控制消息 JSON，终端字节流二进制，使用固定版本号。WebSocket 下可使用 `/control` 与 `/terminal/{session_id}` 分别连接；为避免复杂度，实际实现可先同一 socket 双消息类型，但要通过类型和 sessionId 严格区分。
 
 ### 8.1 控制消息 Envelope
@@ -470,7 +472,7 @@ RADManager/
 | M8：发布版 | 打包、配置迁移、部署手册、兼容测试 | 可在家/公司部署并回滚 |
 | M9（可选 V1.1） | Git Worktree、Codex Provider、原生 Claude 后台会话 | 不修改 core 公共接口即可扩展 |
 
-当前实现记录（2026-10-17）：M2-01 Windows 后端与 M2-02 SessionManager 已实现。真实三会话验证全部 detach 后继续运行、同 ID 重附加、显式终止及输入隔离；Release 全套 20/20 通过，详见 [M2-02 说明](docs/M2-02_SessionManager.md)。M2 实现待用户审查，产品客户端关闭/网络断线的端到端验证仍在后续任务，不把本地 detach 测试视为远程验收。
+当前实现记录（2026-10-17）：M2-01 Windows 后端与 M2-02 SessionManager 已实现。真实三会话验证全部 detach 后继续运行、同 ID 重附加、显式终止及输入隔离；Release 全套 20/20 通过，详见 [M2-02 说明](docs/M2-02_SessionManager.md)。用户已批准提交 M2 并继续后续任务，产品客户端关闭/网络断线的端到端验证仍在后续任务，不把本地 detach 测试视为远程验收。
 
 ## 15. 测试矩阵
 
