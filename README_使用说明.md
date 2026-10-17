@@ -6,7 +6,7 @@ M0-02 已实现本地离线终端演示，运行本机构建目录 `build-termin
 
 ## 当前工程骨架
 
-M1-01 已建立 Client/Agent、Core/Protocol 和 Qt Test 目标，本机 Debug/Release 构建及部署烟测通过。构建、运行、调试入口及已知限制见 [工程骨架与验证](docs/M1-01_工程骨架与验证.md)。M0-03 网络预研按用户要求延期，尚未验收；真实 Claude 和会话功能尚未实现。
+M1-01 已建立 Client/Agent、Core/Protocol 和 Qt Test 目标，本机 Debug/Release 构建及部署烟测通过。构建、运行、调试入口及已知限制见 [工程骨架与验证](docs/M1-01_工程骨架与验证.md)。M0-03 已有家庭测试电脑（用户确认 Claude CLI 可用、Tailscale 已连接），双端联调待实施；NAS 与正式网络场景延期。真实 Claude 和会话功能尚未接入本项目。
 
 ## 文件使用顺序
 
