@@ -26,3 +26,15 @@ add_test(NAME session.integration COMMAND ${CMAKE_COMMAND} -E env
     $<TARGET_FILE:SessionManagerIntegrationTests>
     -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/session-manager-integration.xml,junitxml")
 set_tests_properties(session.integration PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+
+add_executable(AgentWebSocketServerTests AgentWebSocketServerTests.cpp)
+rad_configure_target(AgentWebSocketServerTests)
+target_link_libraries(AgentWebSocketServerTests PRIVATE RADAgentTransport RADProtocol RADWindowsTerminal Qt5::WebSockets Qt5::Test)
+add_dependencies(AgentWebSocketServerTests FakeCli WinConPtyBackendTestsRuntime)
+# 共用集成测试目录下的 ConPTY 运行库，避免重复部署。
+add_test(NAME agent.websocket COMMAND ${CMAKE_COMMAND} -E env
+    "PATH=${RAD_QT_BIN};$ENV{PATH}"
+    "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
+    $<TARGET_FILE:AgentWebSocketServerTests>
+    -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/agent-websocket.xml,junitxml")
+set_tests_properties(agent.websocket PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)

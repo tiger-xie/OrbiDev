@@ -2,7 +2,23 @@ add_executable(RemoteAgent main.cpp)
 rad_configure_target(RemoteAgent)
 target_link_libraries(RemoteAgent PRIVATE RADCore RADProtocol Qt5::Core Qt5::Sql)
 
+if(RAD_BUILD_WINDOWS_BACKEND)
+    target_sources(RemoteAgent PRIVATE AgentConfiguration.cpp AgentConfiguration.h)
+    target_compile_definitions(RemoteAgent PRIVATE RAD_AGENT_SERVER)
+    target_link_libraries(RemoteAgent PRIVATE RADAgentTransport RADWindowsTerminal RADFakeCliProvider)
+    rad_deploy_conpty(RemoteAgent)
+endif()
+
 if(BUILD_TESTING)
+    if(RAD_BUILD_WINDOWS_BACKEND)
+        find_package(Qt5 5.15.2 EXACT REQUIRED COMPONENTS Test)
+        add_executable(RADAgentConfigurationTests AgentConfigurationTests.cpp AgentConfiguration.cpp)
+        rad_configure_target(RADAgentConfigurationTests)
+        target_link_libraries(RADAgentConfigurationTests PRIVATE RADAgentTransport RADFakeCliProvider RADProtocol Qt5::Test)
+        add_test(NAME agent.configuration COMMAND ${CMAKE_COMMAND} -E env
+            "PATH=${RAD_QT_BIN};$ENV{PATH}" $<TARGET_FILE:RADAgentConfigurationTests>)
+        set_tests_properties(agent.configuration PROPERTIES TIMEOUT 30)
+    endif()
     add_test(NAME agent.smoke COMMAND ${CMAKE_COMMAND} -E env
         "PATH=${RAD_QT_BIN};$ENV{PATH}" $<TARGET_FILE:RemoteAgent> --smoke-test)
     set_tests_properties(agent.smoke PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)

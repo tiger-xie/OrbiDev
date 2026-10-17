@@ -17,3 +17,8 @@ target_sources(RADCore PRIVATE session/SessionManager.h session/SessionManager.c
 
 target_sources(RADProtocol PRIVATE protocol/ProtocolCodec.h protocol/ProtocolCodec.cpp)
 target_link_libraries(RADProtocol PUBLIC Qt5::Core)
+
+add_library(RADAgentTransport STATIC transport/AgentWebSocketServer.h transport/AgentWebSocketServer.cpp)
+target_include_directories(RADAgentTransport PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(RADAgentTransport PUBLIC RADCore Qt5::Network PRIVATE RADProtocol Qt5::WebSockets)
+rad_configure_target(RADAgentTransport)

@@ -1,0 +1,4 @@
+add_library(RADFakeCliProvider STATIC FakeCli/FakeCliProvider.cpp FakeCli/FakeCliProvider.h)
+rad_configure_target(RADFakeCliProvider)
+target_include_directories(RADFakeCliProvider PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(RADFakeCliProvider PUBLIC RADCore)
