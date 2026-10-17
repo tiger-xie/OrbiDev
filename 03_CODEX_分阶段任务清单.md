@@ -103,13 +103,15 @@
 
 **验收**：仅授权客户端可访问；故意断 socket 不会终止 CLI；输出队列有上限。
 
-**当前实现（2026-10-17）**：经设备令牌摘要鉴权的 WebSocket 路由、单身份连接、会话 I/O、失联清理和有界输出已实现；Agent 显式 --config 启动固定 FakeCli 服务，工作区 ACL 继续生效。Debug 本机网络集成 10 个方法、配置/Provider 2 个方法及实际 EXE 启动链路通过，完整结果见 [M3-02 说明](docs/M3-02_AgentWebSocket服务.md)。工作区实现待审查；跨机器 Tailscale、Claude、配对 UI/DPAPI 与持久化日志尚未验收，不进入 M4。
+**当前实现（2026-10-17）**：经设备令牌摘要鉴权的 WebSocket 路由、单身份连接、会话 I/O、失联清理和有界输出已实现；Agent 显式 --config 启动固定 FakeCli 服务，工作区 ACL 继续生效。Debug 本机网络集成 10 个方法、配置/Provider 2 个方法及实际 EXE 启动链路通过，完整结果见 [M3-02 说明](docs/M3-02_AgentWebSocket服务.md)。用户已批准提交并继续 M4-01；M3-02 已提交为 `9031644`。跨机器 Tailscale、Claude、配对 UI/DPAPI 与持久化日志尚未验收。
 
 ### TASK-M4-01 — Qt Client 基础界面
 
 **目标**：主机状态、项目树、会话列表、QTabWidget、新建/分离/终止确认。
 
 **验收**：不连接真实 Claude 时能通过 FakeAgent 验证 UI 操作和错误反馈。
+
+**当前实现（2026-10-17）**：M4-01 原生深色界面、FakeAgent 异步操作、多标签与新建/分离/终止确认已实现；集中主题及主题标识为后续换肤预留。Debug/Release 构建及 11 个 UI 行为方法通过，Release 全套 25/25 通过；已查看 100%/125%/150% 实际截图，缩放边界见 [M4-01 说明](docs/M4-01_QtClient基础界面.md)。用户已批准提交 M4-01；真实终端和远程连接留给 M4-02。
 
 ### TASK-M4-02 — TerminalView 集成
 

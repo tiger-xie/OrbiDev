@@ -10,7 +10,7 @@ M1-01 已建立 Client/Agent、Core/Protocol 和 Qt Test 目标，本机 Debug/R
 
 ## 文件使用顺序
 
-M1-02 已定义核心模型、Provider/终端/会话管理接口，测试入口及生产实现边界见 [核心模型与接口](docs/M1-02_核心模型与接口.md)。应用界面仍是 M1-01 骨架；真实 Claude 和附件功能尚未接入；FakeCli 服务见下方 M3-02。
+M1-02 已定义核心模型、Provider/终端/会话管理接口，测试入口及生产实现边界见 [核心模型与接口](docs/M1-02_核心模型与接口.md)。应用界面已进入 M4-01 FakeAgent 基础界面；真实 Claude 和附件功能尚未接入；FakeCli 服务见下方 M3-02。
 
 - `01_RADManager_完整开发计划.md`：总规格；先由项目负责人审核，明确范围和架构。
 - `AGENTS.md`：放到 Codex 直接工作的 Git 仓库**根目录**，作为持续有效的工程规则。
@@ -31,11 +31,11 @@ M1-02 已定义核心模型、Provider/终端/会话管理接口，测试入口�
 
 ## M2-01 后端实现
 
-Windows ConPTY 后端与真实 FakeCli 集成测试见 [M2-01 说明](docs/M2-01_Windows终端后端.md)。Agent 已在 M3-02 组合真实 FakeCli 会话；Client 界面仍待后续任务。
+Windows ConPTY 后端与真实 FakeCli 集成测试见 [M2-01 说明](docs/M2-01_Windows终端后端.md)。Agent 已在 M3-02 组合真实 FakeCli 会话；Client 基础界面见 M4-01。
 
 ## M2-02 本地会话管理
 
-SessionManager 提供创建、查询、附加/分离、控制权租约和显式终止，测试入口见 [M2-02 说明](docs/M2-02_SessionManager.md)。已接入真实后端的集成测试；网络入口已由 M3-02 提供；产品界面仍待后续任务。
+SessionManager 提供创建、查询、附加/分离、控制权租约和显式终止，测试入口见 [M2-02 说明](docs/M2-02_SessionManager.md)。已接入真实后端的集成测试；网络入口已由 M3-02 提供；产品基础界面见 M4-01。
 
 ## M3-01 协议编解码
 
@@ -44,3 +44,7 @@ RADP/1 提供控制消息、终端二进制帧、版本协商及错误协议，�
 ## M3-02 Agent WebSocket 服务
 
 使用 --config 加载本地设备摘要、工作区 ACL 与固定 FakeCli 配置，启动经鉴权的常驻 Agent。配置、协议步骤及本机验收见 [M3-02 说明](docs/M3-02_AgentWebSocket服务.md)。默认无配置仍不监听；不自动配置 Tailscale/防火墙，不包含真实 Claude 或远程 UI。
+
+## M4-01 Qt Client 基础界面
+
+RemoteClient 默认打开深灰/青绿色原生窗口，支持 FakeAgent 主机状态、项目会话树、多标签、新建、分离和终止确认。界面明确标注模拟，不连接真实 Agent；启动与验证见 [M4-01 说明](docs/M4-01_QtClient基础界面.md)。终端交互留给 M4-02。

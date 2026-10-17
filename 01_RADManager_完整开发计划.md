@@ -474,6 +474,8 @@ RADManager/
 | M8：发布版 | 打包、配置迁移、部署手册、兼容测试 | 可在家/公司部署并回滚 |
 | M9（可选 V1.1） | Git Worktree、Codex Provider、原生 Claude 后台会话 | 不修改 core 公共接口即可扩展 |
 
+M4-01 实施记录（2026-10-17）：Qt Client 基础界面已实现主机状态、工作区会话树、多标签和安全确认，并以 FakeAgent 完成界面验收；Debug/Release 构建通过、Release 全套 25/25 测试通过。主题集中且保存 dark 标识，为后续换肤预留；终端字节流及真实 Agent 连接仍属 M4-02，整个 M4 尚未完成。验证范围见 [M4-01 说明](docs/M4-01_QtClient基础界面.md)。
+
 当前实现记录（2026-10-17）：M2-01 Windows 后端与 M2-02 SessionManager 已实现。真实三会话验证全部 detach 后继续运行、同 ID 重附加、显式终止及输入隔离；Release 全套 20/20 通过，详见 [M2-02 说明](docs/M2-02_SessionManager.md)。用户已批准提交 M2 并继续后续任务，产品客户端关闭/网络断线的端到端验证仍在后续任务，不把本地 detach 测试视为远程验收。
 
 ## 15. 测试矩阵
