@@ -1,30 +1,37 @@
 #include "WorkbenchWindow.h"
+#include "HostDialog.h"
 #include "SshSession.h"
 #include "terminal/TerminalView.h"
 
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
 #include <QShortcut>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <memory>
 
 namespace sshworkbench
 {
@@ -35,18 +42,20 @@ WorkbenchWindow::WorkbenchWindow(const QString &profilePath, const QString &proj
     setWindowTitle(tr("OrbiDev · SSH 工作台"));
     resize(1280, 820);
     setMinimumSize(920, 600);
+    m_statePath = m_projectsPath + QStringLiteral(".workbench.json");
     buildUi();
     if (m_preview)
     {
-        m_configuration.projects = {{tr("产品开发"), QStringLiteral("D:/Projects/Product"), true},
-                                    {tr("日常工具"), QStringLiteral("D:/Projects/Tools"), false}};
+        m_state.projects.projects = {{tr("产品开发"), QStringLiteral("D:/Projects/Product"), true},
+                                     {tr("日常工具"), QStringLiteral("D:/Projects/Tools"), false}};
         m_host->setText(tr("家庭电脑  ·  界面预览"));
         showFeedback(tr("界面预览：未读取身份，未启动 SSH，会话不会自动打开。"));
     }
     else
     {
-        reloadProfile();
         loadProjects(legacyPath);
+        renderHosts();
+        reloadProfile();
     }
     renderProjects();
     updateWorkspace();
@@ -78,10 +87,34 @@ void WorkbenchWindow::buildUi()
     m_host = new QLabel(tr("尚未配置家庭电脑"), central);
     m_host->setObjectName(QStringLiteral("hostSummary"));
     m_host->setTextFormat(Qt::PlainText);
+    m_hostSelector = new QComboBox(central);
+    m_hostSelector->setObjectName(QStringLiteral("hostSelector"));
+    m_hostSelector->setMinimumWidth(180);
+    m_hostSelector->setMaximumWidth(280);
+    m_hostSelector->setEnabled(!m_preview);
+    toolbar->addWidget(m_hostSelector);
     toolbar->addWidget(m_host, 1);
+    connect(m_hostSelector, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this](int index)
+            {
+                if (index < 0 || m_preview)
+                    return;
+                auto next = m_state;
+                next.currentHostId = m_hostSelector->itemData(index).toString();
+                if (!saveState(next))
+                    renderHosts();
+                reloadProfile();
+                renderProjects();
+            });
     auto *settings = new QPushButton(tr("连接设置…"), central);
     settings->setObjectName(QStringLiteral("connectionSettingsButton"));
-    connect(settings, &QPushButton::clicked, this, &WorkbenchWindow::openSetup);
+    auto *hostMenu = new QMenu(settings);
+    hostMenu->addAction(tr("添加家庭电脑…"), this, [this] { editHost(true); });
+    hostMenu->addAction(tr("编辑当前主机／测试连接…"), this, [this] { editHost(false); });
+    hostMenu->addAction(tr("首次配置向导（当前主机）…"), this, &WorkbenchWindow::openSetup);
+    hostMenu->addSeparator();
+    hostMenu->addAction(tr("移除当前主机…"), this, &WorkbenchWindow::removeHost);
+    settings->setMenu(hostMenu);
     toolbar->addWidget(settings);
     for (int delta : {-1, 1})
     {
@@ -137,8 +170,8 @@ void WorkbenchWindow::buildUi()
             {
                 if (m_renderingProjects || m_preview)
                     return;
-                auto next = m_configuration;
-                next.projects[m_projects->row(item)].enabled = item->checkState() == Qt::Checked;
+                auto next = m_state.projects;
+                next.projects[item->data(Qt::UserRole).toInt()].enabled = item->checkState() == Qt::Checked;
                 if (!saveProjects(next))
                     renderProjects();
             });
@@ -205,23 +238,27 @@ void WorkbenchWindow::buildUi()
     settings->setEnabled(!m_preview);
 }
 
+void WorkbenchWindow::renderHosts()
+{
+    const QSignalBlocker blocker(m_hostSelector);
+    m_hostSelector->clear();
+    for (const auto &host : m_state.hosts)
+        m_hostSelector->addItem(host.name, host.id);
+    m_hostSelector->setCurrentIndex(m_hostSelector->findData(m_state.currentHostId));
+}
+
 bool WorkbenchWindow::reloadProfile()
 {
-    QString error;
-    sshsetup::ConnectionProfile profile;
-    m_profileReady = sshsetup::loadProfile(m_profilePath, profile, error);
+    const auto *host = findHost(m_state, m_state.currentHostId);
+    m_profileReady = host && m_projectsReadable;
     if (m_profileReady)
     {
-        m_profile = profile;
-        m_host->setText(
-            tr("%1@%2:%3  ·  已配置，连接状态见终端").arg(profile.user, profile.host).arg(profile.port));
-        showFeedback(tr("主机配置已加载。双击项目切换已有终端，“新建终端”额外创建会话。"));
+        m_profile = host->connection;
+        m_host->setText(tr("%1@%2:%3").arg(m_profile.user, m_profile.host).arg(m_profile.port));
+        m_host->setToolTip(tr("已配置，实际连接状态请查看各终端"));
     }
     else
-    {
-        m_host->setText(tr("尚未准备好家庭连接"));
-        showFeedback(tr("请先完成“连接设置”。%1").arg(error), true);
-    }
+        m_host->setText(tr("请先添加或配置家庭电脑"));
     m_openSelected->setEnabled(m_profileReady && !m_preview);
     m_newTerminal->setEnabled(m_profileReady && !m_preview);
     return m_profileReady;
@@ -229,15 +266,141 @@ bool WorkbenchWindow::reloadProfile()
 
 void WorkbenchWindow::loadProjects(const QString &legacyPath)
 {
-    const QString source = QFileInfo::exists(m_projectsPath) ? m_projectsPath : legacyPath;
-    if (source.isEmpty() || !QFileInfo::exists(source))
-        return;
     QString error;
-    m_projectsReadable = launcher::loadProjectConfiguration(source, m_configuration, error);
+    m_projectsReadable =
+        loadOrMigrateWorkbenchState(m_statePath, m_profilePath, m_projectsPath, legacyPath, m_state, error);
     if (!m_projectsReadable)
-        showFeedback(tr("项目配置未加载，原文件保留：%1").arg(error), true);
-    else if (source != m_projectsPath)
-        showFeedback(tr("已读取旧项目；编辑后保存在新的工作台配置中，旧文件保持不变。"));
+        showFeedback(tr("配置未加载，原文件保留：%1").arg(error) +
+                         (!QFileInfo::exists(m_profilePath) ? tr(" 若旧项目缺少连接，请先运行首次设置工具完成"
+                                                                 "连接配置，再重新打开工作台。连接文件：%1")
+                                                                  .arg(m_profilePath)
+                                                            : QString()),
+                     true);
+}
+
+int WorkbenchWindow::projectRow() const
+{
+    const auto *item = m_projects->currentItem();
+    return item ? item->data(Qt::UserRole).toInt() : -1;
+}
+
+bool WorkbenchWindow::saveState(const WorkbenchState &state)
+{
+    if (m_preview || !m_projectsReadable)
+    {
+        showFeedback(tr("配置不可写，请先处理读取错误；原文件保留。"), true);
+        return false;
+    }
+    QString error;
+    if (!saveWorkbenchState(m_statePath, state, error))
+    {
+        showFeedback(error, true);
+        return false;
+    }
+    m_state = state;
+    return true;
+}
+
+void WorkbenchWindow::editHost(bool add)
+{
+    if (m_preview || !m_projectsReadable)
+        return;
+    HostProfile host;
+    const auto *current = findHost(m_state, m_state.currentHostId);
+    if (!add && m_setupRunning && current && current->id == m_setupHostId)
+    {
+        showFeedback(tr("当前主机的首次配置向导仍在运行，请完成或关闭向导后再编辑。"), true);
+        return;
+    }
+    if (!add && !current)
+    {
+        showFeedback(tr("请先添加家庭电脑。"));
+        return;
+    }
+    if (add)
+    {
+        host.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (current)
+            host.connection.identityFile = current->connection.identityFile;
+    }
+    else
+        host = *current;
+    HostDialog dialog(host, this);
+    dialog.setWindowTitle(add ? tr("添加家庭主机") : tr("编辑家庭主机"));
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    auto next = m_state;
+    if (add)
+        next.hosts.append(dialog.host());
+    else
+        for (auto &entry : next.hosts)
+            if (entry.id == host.id)
+                entry = dialog.host();
+    next.currentHostId = host.id;
+    if (saveState(next))
+    {
+        renderHosts();
+        reloadProfile();
+        renderProjects();
+        showFeedback(tr("主机已保存；已有终端继续使用创建时的连接配置。"));
+    }
+}
+
+void WorkbenchWindow::removeHost()
+{
+    const auto *host = findHost(m_state, m_state.currentHostId);
+    if (m_preview || !host)
+        return;
+    const QString hostId = host->id;
+    const QString hostName = host->name;
+    const auto removable = [this, hostId]
+    {
+        QSet<QString> references;
+        QStringList labels;
+        for (const auto &project : m_state.projects.projects)
+            if (m_state.projectHosts.value(project.id) == hostId)
+                labels.append(tr("项目：%1").arg(project.name));
+        for (int i = 0; i < m_tabs->count(); ++i)
+            if (m_tabs->widget(i)->property("hostId").toString() == hostId)
+            {
+                references.insert(hostId);
+                labels.append(tr("标签：%1").arg(m_tabs->tabText(i)));
+            }
+        if (m_setupRunning && m_setupHostId == hostId)
+        {
+            references.insert(hostId);
+            labels.append(tr("首次配置向导"));
+        }
+        QString error;
+        if (canRemoveHost(m_state, hostId, references, error))
+            return true;
+        showFeedback(error + QLatin1Char(' ') + labels.join(QStringLiteral("；")), true);
+        return false;
+    };
+    if (!removable())
+        return;
+    if (QMessageBox::question(this, tr("移除主机"),
+                              tr("从本机档案移除“%1”？不会修改家庭电脑或删除密钥。").arg(hostName),
+                              QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+    // 确认框期间向导和会话仍会处理事件，按原 ID 重新检查引用。
+    if (!removable())
+        return;
+    auto next = m_state;
+    for (int i = 0; i < next.hosts.size(); ++i)
+        if (next.hosts[i].id == hostId)
+        {
+            next.hosts.removeAt(i);
+            break;
+        }
+    if (next.currentHostId == hostId)
+        next.currentHostId = next.hosts.isEmpty() ? QString() : next.hosts.front().id;
+    if (saveState(next))
+    {
+        renderHosts();
+        reloadProfile();
+        renderProjects();
+    }
 }
 
 void WorkbenchWindow::renderProjects()
@@ -245,48 +408,42 @@ void WorkbenchWindow::renderProjects()
     m_renderingProjects = true;
     const int previous = m_projects->currentRow();
     m_projects->clear();
-    for (const auto &project : m_configuration.projects)
+    for (int row = 0; row < m_state.projects.projects.size(); ++row)
     {
+        const auto &project = m_state.projects.projects[row];
+        if (!m_preview && m_state.projectHosts.value(project.id) != m_state.currentHostId)
+            continue;
         auto *item =
             new QListWidgetItem(project.name + QLatin1Char('\n') +
                                     (project.directory.isEmpty() ? tr("家庭用户目录") : project.directory),
                                 m_projects);
+        item->setData(Qt::UserRole, row);
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable |
                        (m_preview ? Qt::NoItemFlags : Qt::ItemIsUserCheckable));
         item->setCheckState(project.enabled ? Qt::Checked : Qt::Unchecked);
         item->setToolTip(project.directory);
     }
-    if (!m_configuration.projects.isEmpty())
-        m_projects->setCurrentRow(qBound(0, previous, m_configuration.projects.size() - 1));
+    if (m_projects->count() > 0)
+        m_projects->setCurrentRow(qBound(0, previous, m_projects->count() - 1));
     m_renderingProjects = false;
 }
 
 bool WorkbenchWindow::saveProjects(const launcher::Configuration &configuration)
 {
-    if (m_preview || !m_projectsReadable)
-    {
-        showFeedback(tr("项目配置不可写；请先处理读取错误，避免覆盖原文件。"), true);
-        return false;
-    }
-    QString error;
-    if (!QDir().mkpath(QFileInfo(m_projectsPath).absolutePath()))
-        error = tr("无法创建项目配置目录。");
-    else if (launcher::saveProjectConfiguration(m_projectsPath, configuration, error))
-    {
-        m_configuration = configuration;
-        m_projectsPersisted = true;
-        showFeedback(tr("项目已保存。编辑目录不影响已经打开的终端。"));
-        return true;
-    }
-    showFeedback(error, true);
-    return false;
+    auto next = m_state;
+    next.projects = configuration;
+    QMap<QString, QString> bindings;
+    for (const auto &project : configuration.projects)
+        bindings.insert(project.id, next.projectHosts.value(project.id, next.currentHostId));
+    next.projectHosts = bindings;
+    return saveState(next);
 }
 
 void WorkbenchWindow::editProject(bool add)
 {
-    if (m_preview)
+    if (m_preview || !reloadProfile())
         return;
-    const int row = m_projects->currentRow();
+    const int row = projectRow();
     if (!add && row < 0)
         return;
     QDialog dialog(this);
@@ -300,11 +457,18 @@ void WorkbenchWindow::editProject(bool add)
     directory->setMaxLength(1024);
     if (!add)
     {
-        name->setText(m_configuration.projects[row].name);
-        directory->setText(m_configuration.projects[row].directory);
+        name->setText(m_state.projects.projects[row].name);
+        directory->setText(m_state.projects.projects[row].directory);
     }
     layout->addRow(tr("项目名称"), name);
     layout->addRow(tr("远程目录"), directory);
+    auto *hostChoice = new QComboBox(&dialog);
+    hostChoice->setObjectName(QStringLiteral("projectHostChoice"));
+    for (const auto &host : m_state.hosts)
+        hostChoice->addItem(host.name, host.id);
+    hostChoice->setCurrentIndex(hostChoice->findData(
+        add ? m_state.currentHostId : m_state.projectHosts.value(m_state.projects.projects[row].id)));
+    layout->addRow(tr("所属主机"), hostChoice);
     auto *errorLabel = new QLabel(&dialog);
     errorLabel->setWordWrap(true);
     errorLabel->setTextFormat(Qt::PlainText);
@@ -317,7 +481,7 @@ void WorkbenchWindow::editProject(bool add)
     connect(buttons, &QDialogButtonBox::accepted, &dialog,
             [&, this]
             {
-                auto next = m_configuration;
+                auto next = m_state.projects;
                 launcher::Project project{name->text().trimmed(), directory->text().trimmed(), true};
                 if (add)
                 {
@@ -336,7 +500,10 @@ void WorkbenchWindow::editProject(bool add)
                     errorLabel->setText(error);
                     return;
                 }
-                if (saveProjects(next))
+                auto state = m_state;
+                state.projects = next;
+                state.projectHosts.insert(project.id, hostChoice->currentData().toString());
+                if (saveState(state))
                     dialog.accept();
                 else
                     errorLabel->setText(m_feedback->text());
@@ -347,14 +514,14 @@ void WorkbenchWindow::editProject(bool add)
 
 void WorkbenchWindow::removeProject()
 {
-    const int row = m_projects->currentRow();
+    const int row = projectRow();
     if (m_preview || row < 0)
         return;
     if (QMessageBox::question(this, tr("移除项目"),
                               tr("只从项目列表移除，不会删除远程文件，也不会关闭已有终端。"),
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
         return;
-    auto next = m_configuration;
+    auto next = m_state.projects;
     next.projects.removeAt(row);
     if (saveProjects(next))
         renderProjects();
@@ -364,26 +531,24 @@ void WorkbenchWindow::openCurrent(bool createNew)
 {
     if (m_preview || m_closing || !reloadProfile())
         return;
-    const int row = m_projects->currentRow();
+    const int row = projectRow();
     if (row < 0)
     {
         showFeedback(tr("请先添加并选择一个项目。"));
         return;
     }
-    if (!m_projectsPersisted && !saveProjects(m_configuration))
-        return;
-    openProject(m_configuration.projects[row], createNew);
+
+    openProject(m_state.projects.projects[row], createNew);
 }
 
 void WorkbenchWindow::openSelected()
 {
     if (m_preview || m_closing || !reloadProfile())
         return;
-    if (!m_projectsPersisted && !saveProjects(m_configuration))
-        return;
+
     bool selected = false;
-    for (const auto &project : m_configuration.projects)
-        if (project.enabled)
+    for (const auto &project : m_state.projects.projects)
+        if (project.enabled && m_state.projectHosts.value(project.id) == m_state.currentHostId)
         {
             selected = true;
             openProject(project);
@@ -396,14 +561,23 @@ void WorkbenchWindow::openProject(const launcher::Project &project, bool createN
 {
     if (m_closing || m_preview)
         return;
+    const auto hostId = m_state.projectHosts.value(project.id);
+    const auto *host = findHost(m_state, hostId);
+    if (!host)
+    {
+        showFeedback(tr("项目所属主机不存在，请编辑项目重新选择。"), true);
+        return;
+    }
+    const auto profile = host->connection;
     // 保存创建时的目标快照；改名不改变身份，改目录或连接则不能复用旧会话。
-    const QStringList target{project.id,
+    const QStringList target{hostId,
+                             project.id,
                              project.directory,
-                             m_profile.host,
-                             m_profile.user,
-                             QString::number(m_profile.port),
-                             m_profile.identityFile,
-                             m_profile.hostFingerprint};
+                             profile.host,
+                             profile.user,
+                             QString::number(profile.port),
+                             profile.identityFile,
+                             profile.hostFingerprint};
     QWidget *existing = nullptr;
     quint64 latest = 0;
     if (!createNew && !project.id.isEmpty())
@@ -438,6 +612,7 @@ void WorkbenchWindow::openProject(const launcher::Project &project, bool createN
         return;
     }
     auto *page = new QWidget(m_tabs);
+    page->setProperty("hostId", hostId);
     page->setProperty("sessionTarget", target);
     page->setProperty("sessionPending", true);
     page->setProperty("columns", 120);
@@ -452,7 +627,6 @@ void WorkbenchWindow::openProject(const launcher::Project &project, bool createN
     auto *terminal = new rad::client::TerminalView(page);
     layout->addWidget(terminal, 1);
     auto *session = new SshSession(page);
-    const auto profile = m_profile;
     const QString name = project.name;
     const QString directory = project.directory;
     const int index = m_tabs->addTab(page, name + tr(" · 准备中"));
@@ -553,6 +727,12 @@ void WorkbenchWindow::finishTerminalClose(QWidget *page)
 
 void WorkbenchWindow::closeEvent(QCloseEvent *event)
 {
+    if (m_setupRunning)
+    {
+        showFeedback(tr("首次配置向导仍在运行，请完成或关闭向导后再退出工作台。"), true);
+        event->ignore();
+        return;
+    }
     bool active = false;
     bool pending = false;
     for (int i = 0; i < m_tabs->count(); ++i)
@@ -594,7 +774,7 @@ void WorkbenchWindow::closeEvent(QCloseEvent *event)
 }
 void WorkbenchWindow::openSetup()
 {
-    if (m_preview)
+    if (m_preview || !m_projectsReadable || m_setupRunning)
         return;
     const QString executable = QCoreApplication::applicationDirPath() + QStringLiteral("/OrbiDevSetup.exe");
     if (!QFileInfo::exists(executable))
@@ -602,20 +782,93 @@ void WorkbenchWindow::openSetup()
         showFeedback(tr("未找到首次设置工具，请将 OrbiDevSetup.exe 与工作台放在同一目录。"), true);
         return;
     }
+    auto temporary = std::make_shared<QTemporaryDir>();
+    if (!temporary->isValid())
+    {
+        showFeedback(tr("无法创建向导临时配置目录。"), true);
+        return;
+    }
+    const QString output = temporary->filePath(QStringLiteral("connection.json"));
+    const auto *host = findHost(m_state, m_state.currentHostId);
+    const QString hostId = host ? host->id : QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const bool adding = !host;
+    QString error;
+    if (host && !sshsetup::saveProfile(output, host->connection, error))
+    {
+        showFeedback(error, true);
+        return;
+    }
+    QFile original(output);
+    QByteArray originalBytes;
+    if (original.open(QIODevice::ReadOnly))
+        originalBytes = original.readAll();
+    original.close();
     auto *process = new QProcess(this);
+    m_setupRunning = true;
+    m_setupHostId = hostId;
     connect(process, &QProcess::errorOccurred, this,
-            [this, process](QProcess::ProcessError)
+            [this, process, temporary](QProcess::ProcessError)
             {
-                showFeedback(tr("无法打开首次设置：%1").arg(process->errorString()), true);
+                m_setupRunning = false;
+                showFeedback(tr("无法运行首次设置：%1").arg(process->errorString()), true);
                 process->deleteLater();
             });
     connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
-            [this, process](int, QProcess::ExitStatus)
+            [this, process, temporary, output, hostId, adding, originalBytes](int code,
+                                                                              QProcess::ExitStatus status)
             {
-                reloadProfile();
+                m_setupRunning = false;
                 process->deleteLater();
+                if (code != 0 || status != QProcess::NormalExit || !QFileInfo::exists(output))
+                    return;
+                QFile result(output);
+                if (!result.open(QIODevice::ReadOnly))
+                {
+                    showFeedback(tr("无法读取向导输出，未更新主机。"), true);
+                    return;
+                }
+                if (result.readAll() == originalBytes)
+                    return;
+                result.close();
+                sshsetup::ConnectionProfile profile;
+                QString error;
+                if (!sshsetup::loadProfile(output, profile, error))
+                {
+                    showFeedback(error, true);
+                    return;
+                }
+                if (applySetupProfile(hostId, profile, adding))
+                {
+                    renderHosts();
+                    reloadProfile();
+                    renderProjects();
+                    showFeedback(tr("已更新向导对应的主机，其他主机和已有终端保持原配置。"));
+                }
             });
-    process->start(executable, {QStringLiteral("--config"), m_profilePath});
+    process->start(executable, {QStringLiteral("--config"), output});
+}
+
+bool WorkbenchWindow::applySetupProfile(const QString &hostId, const sshsetup::ConnectionProfile &profile,
+                                        bool adding)
+{
+    auto next = m_state;
+    bool found = false;
+    for (auto &entry : next.hosts)
+        if (entry.id == hostId)
+        {
+            entry.connection = profile;
+            found = true;
+        }
+    if (adding && !found)
+        next.hosts.append({hostId, profile.host, profile});
+    else if (!found || adding)
+    {
+        showFeedback(tr("向导目标主机已改变，未覆盖其他档案。"), true);
+        return false;
+    }
+    if (next.currentHostId.isEmpty())
+        next.currentHostId = hostId;
+    return saveState(next);
 }
 
 void WorkbenchWindow::showFeedback(const QString &message, bool error)

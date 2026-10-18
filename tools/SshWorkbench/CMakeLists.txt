@@ -14,11 +14,11 @@ target_link_libraries(WorkbenchPty PRIVATE RADConPtyRuntime)
 target_compile_definitions(WorkbenchPty PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
 setup_target(WorkbenchPty)
 
-add_library(WorkbenchCore STATIC SshSession.cpp SshSession.h ../ProjectLauncher/LauncherCore.cpp)
+add_library(WorkbenchCore STATIC WorkbenchStore.cpp WorkbenchStore.h SshSession.cpp SshSession.h ../ProjectLauncher/LauncherCore.cpp)
 target_include_directories(WorkbenchCore PUBLIC . ../ProjectLauncher ../SshSetup)
 target_link_libraries(WorkbenchCore PUBLIC SshSetupCore PRIVATE WorkbenchPty)
 setup_target(WorkbenchCore)
-add_library(WorkbenchUi STATIC WorkbenchWindow.cpp WorkbenchWindow.h
+add_library(WorkbenchUi STATIC HostDialog.cpp HostDialog.h WorkbenchWindow.cpp WorkbenchWindow.h
     "${ORBIDEV_ROOT}/apps/RemoteClient/terminal/TerminalView.cpp"
     "${ORBIDEV_ROOT}/apps/RemoteClient/terminal/TerminalBridge.h"
     "${ORBIDEV_ROOT}/frontend/terminal/client-terminal.qrc")
@@ -43,7 +43,7 @@ if(BUILD_TESTING)
     setup_target(FakeCli)
     target_compile_definitions(FakeCli PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
     find_package(Qt5 5.15.2 EXACT REQUIRED COMPONENTS Test)
-    foreach(suite IN ITEMS SshSession WorkbenchWindow ProjectConfiguration)
+    foreach(suite IN ITEMS SshSession WorkbenchWindow ProjectConfiguration WorkbenchStore HostDialog)
         add_executable(${suite}Tests ${suite}Tests.cpp)
         target_link_libraries(${suite}Tests PRIVATE WorkbenchUi Qt5::Test)
         setup_target(${suite}Tests)

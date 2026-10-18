@@ -1,6 +1,8 @@
+#include "SetupTheme.h"
 #include "SshSession.h"
 #include "WorkbenchWindow.h"
 #include "terminal/TerminalView.h"
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QLabel>
@@ -17,6 +19,19 @@ class WorkbenchWindowTests final : public QObject
 {
     Q_OBJECT
 private:
+    static void bindProject(sshworkbench::WorkbenchWindow &window, const launcher::Project &project)
+    {
+        if (window.m_state.hosts.isEmpty())
+        {
+            sshworkbench::HostProfile host;
+            host.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            host.name = QStringLiteral("测试机");
+            host.connection.host = QStringLiteral("test.invalid");
+            window.m_state.hosts.append(host);
+            window.m_state.currentHostId = host.id;
+        }
+        window.m_state.projectHosts.insert(project.id, window.m_state.currentHostId);
+    }
     static void answerClosePrompt(QMessageBox::StandardButton answer)
     {
         QTimer::singleShot(0, qApp,
@@ -39,8 +54,9 @@ private slots:
         QVERIFY(sshsetup::saveProfile(profilePath, profile, error));
         sshworkbench::WorkbenchWindow window(profilePath,
                                              directory.filePath(QStringLiteral("projects.json")));
-        window.m_configuration.projects = {
+        window.m_state.projects.projects = {
             {QStringLiteral("项目"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)}};
+        bindProject(window, window.m_state.projects.projects.front());
         window.renderProjects();
         auto *list = window.m_projects;
         auto *tabs = window.m_tabs;
@@ -74,9 +90,10 @@ private slots:
         tabs->widget(1)->setProperty("sessionPending", false);
         doubleClick();
         QCOMPARE(tabs->count(), 3);
-        auto second = window.m_configuration.projects.front();
+        auto second = window.m_state.projects.projects.front();
         second.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        window.m_configuration.projects.append(second);
+        window.m_state.projects.projects.append(second);
+        bindProject(window, second);
         window.renderProjects();
         window.m_openSelected->click();
         window.m_openSelected->click();
@@ -94,6 +111,7 @@ private slots:
                                              directory.filePath(QStringLiteral("projects.json")));
         launcher::Project project{
             QStringLiteral("项目"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
         window.openProject(project);
         auto *page = window.m_tabs->widget(0);
         auto *terminal = page->findChild<rad::client::TerminalView *>();
@@ -119,6 +137,7 @@ private slots:
                                   QUuid::createUuid().toString(QUuid::WithoutBraces)};
         auto open = [&](const launcher::Project &value)
         {
+            bindProject(window, value);
             window.openProject(value);
             for (auto *terminal : window.findChildren<rad::client::TerminalView *>())
                 QObject::disconnect(terminal, nullptr, terminal->parent(), nullptr);
@@ -134,16 +153,16 @@ private slots:
         project.directory = QStringLiteral("D:/Two");
         open(project);
         QCOMPARE(window.m_tabs->count(), 3);
-        window.m_profile.host = QStringLiteral("other.invalid");
+        window.m_state.hosts[0].connection.host = QStringLiteral("other.invalid");
         open(project);
         QCOMPARE(window.m_tabs->count(), 4);
-        window.m_profile.user = QStringLiteral("other");
+        window.m_state.hosts[0].connection.user = QStringLiteral("other");
         open(project);
-        window.m_profile.port = 2222;
+        window.m_state.hosts[0].connection.port = 2222;
         open(project);
-        window.m_profile.identityFile = QStringLiteral("C:/key");
+        window.m_state.hosts[0].connection.identityFile = QStringLiteral("C:/key");
         open(project);
-        window.m_profile.hostFingerprint = QStringLiteral("changed");
+        window.m_state.hosts[0].connection.hostFingerprint = QStringLiteral("changed");
         open(project);
         QCOMPARE(window.m_tabs->count(), 8);
         open(project);
@@ -154,6 +173,94 @@ private slots:
         window.m_tabs->currentWidget()->setProperty("terminalFailed", true);
         open(project);
         QCOMPARE(window.m_tabs->count(), 9);
+    }
+
+    void setupUpdatesCapturedHostInsteadOfCurrentSelection()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        sshsetup::ConnectionProfile first;
+        first.host = QStringLiteral("first.invalid");
+        const auto firstId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        QVERIFY(window.applySetupProfile(firstId, first, true));
+        auto second = first;
+        second.host = QStringLiteral("second.invalid");
+        const auto secondId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        QVERIFY(window.applySetupProfile(secondId, second, true));
+        window.m_state.currentHostId = secondId;
+        first.host = QStringLiteral("updated.invalid");
+        QVERIFY(window.applySetupProfile(firstId, first, false));
+        QCOMPARE(window.m_state.currentHostId, secondId);
+        QCOMPARE(sshworkbench::findHost(window.m_state, secondId)->connection.host, second.host);
+        QCOMPARE(sshworkbench::findHost(window.m_state, firstId)->connection.host, first.host);
+        QVERIFY(!window.applySetupProfile(QStringLiteral("removed"), first, false));
+        QCOMPARE(window.m_state.hosts.size(), 2);
+    }
+
+    void switchingHostsKeepsProjectBindingsAndExistingTabs()
+    {
+        QTemporaryDir directory;
+        const auto profilePath = directory.filePath(QStringLiteral("profile.json"));
+        const auto projectsPath = directory.filePath(QStringLiteral("projects.json"));
+        sshworkbench::WorkbenchWindow window(profilePath, projectsPath);
+        launcher::Project first{QStringLiteral("同名项目"), QStringLiteral("D:/Same"), true,
+                                QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, first);
+        auto second = first;
+        second.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        auto secondHost = window.m_state.hosts.front();
+        secondHost.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        secondHost.name = QStringLiteral("另一台");
+        secondHost.connection.host = QStringLiteral("second.invalid");
+        window.m_state.hosts.append(secondHost);
+        window.m_state.projects.projects = {first, second};
+        window.m_state.projectHosts.insert(second.id, secondHost.id);
+        QVERIFY(window.saveState(window.m_state));
+        window.renderHosts();
+        window.reloadProfile();
+        window.renderProjects();
+        const auto screenshot = qEnvironmentVariable("ORBIDEV_WORKBENCH_SCREENSHOT");
+        if (!screenshot.isEmpty())
+        {
+            sshsetup::applySetupTheme(*qApp);
+            window.show();
+            QTest::qWait(100);
+            QVERIFY(window.grab().save(screenshot));
+        }
+        QCOMPARE(window.m_projects->count(), 1);
+        window.openCurrent();
+        QCOMPARE(window.m_tabs->count(), 1);
+        auto *firstTab = window.m_tabs->widget(0);
+        const auto originalTarget = firstTab->property("sessionTarget").toStringList();
+        for (auto *terminal : window.findChildren<rad::client::TerminalView *>())
+            QObject::disconnect(terminal, nullptr, terminal->parent(), nullptr);
+        window.m_hostSelector->setCurrentIndex(1);
+        QCOMPARE(window.m_projects->count(), 1);
+        QCOMPARE(window.projectRow(), 1);
+        window.openSelected();
+        QCOMPARE(window.m_tabs->count(), 2);
+        QCOMPARE(firstTab->property("sessionTarget").toStringList().join('|'), originalTarget.join('|'));
+        for (auto *terminal : window.findChildren<rad::client::TerminalView *>())
+            QObject::disconnect(terminal, nullptr, terminal->parent(), nullptr);
+        window.removeHost();
+        QCOMPARE(window.m_state.hosts.size(), 2);
+        sshworkbench::WorkbenchWindow reloaded(profilePath, projectsPath);
+        QCOMPARE(reloaded.m_state.hosts.size(), 2);
+        QCOMPARE(reloaded.m_state.currentHostId, secondHost.id);
+        QCOMPARE(reloaded.projectRow(), 1);
+        window.m_hostSelector->setCurrentIndex(0);
+        window.openCurrent();
+        QCOMPARE(window.m_tabs->count(), 2);
+        QCOMPARE(window.m_tabs->currentWidget(), firstTab);
+        auto changed = window.m_state;
+        changed.hosts[0].connection.host = QStringLiteral("changed.invalid");
+        QVERIFY(window.saveState(changed));
+        window.openCurrent();
+        QCOMPARE(window.m_tabs->count(), 3);
+        QCOMPARE(firstTab->property("sessionTarget").toStringList().join('|'), originalTarget.join('|'));
+        for (auto *terminal : window.findChildren<rad::client::TerminalView *>())
+            QObject::disconnect(terminal, nullptr, terminal->parent(), nullptr);
     }
 
     void sessionStartingDuringCloseConfirmationIsAwaited()
@@ -243,16 +350,21 @@ private slots:
         QVERIFY(original.open(QIODevice::ReadOnly));
         const auto before = original.readAll();
         original.close();
-        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")), projects,
-                                             legacy);
+        const auto profilePath = directory.filePath(QStringLiteral("profile.json"));
+        sshsetup::ConnectionProfile profile;
+        profile.host = QStringLiteral("test.invalid");
+        QVERIFY(sshsetup::saveProfile(profilePath, profile, error));
+        sshworkbench::WorkbenchWindow window(profilePath, projects, legacy);
         auto *list = window.findChild<QListWidget *>(QStringLiteral("projectList"));
         QCOMPARE(list->count(), 2);
         QCOMPARE(list->item(0)->checkState(), Qt::Checked);
         QCOMPARE(list->item(1)->checkState(), Qt::Unchecked);
         QVERIFY(!QFile::exists(projects));
         list->item(1)->setCheckState(Qt::Checked);
-        launcher::Configuration saved;
-        QVERIFY2(launcher::loadProjectConfiguration(projects, saved, error), qPrintable(error));
+        sshworkbench::WorkbenchState state;
+        QVERIFY2(sshworkbench::loadWorkbenchState(projects + QStringLiteral(".workbench.json"), state, error),
+                 qPrintable(error));
+        const auto &saved = state.projects;
         QCOMPARE(saved.projects.at(0).name, configuration.projects.at(0).name);
         QCOMPARE(saved.projects.at(0).directory, configuration.projects.at(0).directory);
         QVERIFY(saved.projects.at(1).enabled);

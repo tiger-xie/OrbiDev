@@ -1,10 +1,11 @@
 #pragma once
 
 #include "EnvironmentService.h"
-#include "LauncherCore.h"
+#include "WorkbenchStore.h"
 #include <QMainWindow>
 
 class WorkbenchWindowTests;
+class QComboBox;
 class QLabel;
 class QListWidget;
 class QPushButton;
@@ -27,6 +28,11 @@ protected:
 private:
     friend class ::WorkbenchWindowTests;
     void buildUi();
+    void renderHosts();
+    void editHost(bool add);
+    void removeHost();
+    bool saveState(const WorkbenchState &state);
+    int projectRow() const;
     void loadProjects(const QString &legacyPath);
     bool reloadProfile();
     void renderProjects();
@@ -39,18 +45,23 @@ private:
     void closeTerminal(int index);
     void finishTerminalClose(QWidget *page);
     void openSetup();
+    bool applySetupProfile(const QString &hostId, const sshsetup::ConnectionProfile &profile, bool adding);
     void showFeedback(const QString &message, bool error = false);
     void updateWorkspace();
 
     QString m_profilePath;
     QString m_projectsPath;
-    launcher::Configuration m_configuration;
+    WorkbenchState m_state;
+    QString m_statePath;
+    QString m_setupHostId;
+    bool m_setupRunning = false;
+    QComboBox *m_hostSelector = nullptr;
     sshsetup::ConnectionProfile m_profile;
     quint64 m_activationSerial = 0;
     bool m_preview = false;
     bool m_closing = false;
     bool m_projectsReadable = true;
-    bool m_projectsPersisted = false;
+
     bool m_profileReady = false;
     bool m_renderingProjects = false;
     QLabel *m_host = nullptr;
