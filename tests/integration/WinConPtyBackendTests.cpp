@@ -168,6 +168,13 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains(QStringLiteral("[ECHO]中文往返验证").toUtf8()),
                                  10000);
         QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains("\x1b[32m[COLOR]"), 10000);
+        // 手动纠正命令前缀和已提交的中文时，退格不能混入待执行命令。
+        const QByteArray edited = QByteArray("\b\x7f"
+                                             "echX\x7f") +
+                                  "o " + QStringLiteral("退格中错").toUtf8() + '\b' +
+                                  QStringLiteral("文\r").toUtf8();
+        QVERIFY(backend.writeInput(edited).isSuccess());
+        QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains(QStringLiteral("[ECHO]退格中文").toUtf8()), 10000);
         QVERIFY(backend.writeInput(QByteArray("\x03\x1b[A", 4)).isSuccess());
         QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains("[CTRL_C]"), 10000);
         QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains("[UP]"), 10000);
@@ -188,6 +195,48 @@ private slots:
         QCOMPARE(finished.count(), 1);
         QCOMPARE(failed.count(), 0);
         QVERIFY(!capture.m_readFailed && !capture.m_wrongThread && !capture.m_outputAfterFinished);
+    }
+
+    void interactiveInput()
+    {
+        QTemporaryDir workspace;
+        QVERIFY(workspace.isValid());
+        rad::WinConPtyBackend backend({{workspace.path()}});
+        Capture capture(backend);
+        QSignalSpy finished(&backend, &rad::ITerminalBackend::finished);
+        auto spec = launchSpec(workspace.path());
+        spec.arguments = QStringList{QStringLiteral("--interactive")};
+        QVERIFY(backend.start(spec).isSuccess());
+        QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains("[READY]"), 15000);
+        // 没有回车也必须收到远端回显，而不是依赖客户端伪造输入画面。
+        QVERIFY(backend.writeInput(QStringLiteral("实时中文错").toUtf8()).isSuccess());
+        QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains(QStringLiteral("实时中文错").toUtf8()), 10000);
+        QVERIFY(!capture.m_bytes.contains("[TEXT]"));
+        QVERIFY(backend.writeInput(QByteArray("\x7f") + QStringLiteral("好\r").toUtf8()).isSuccess());
+        QTRY_VERIFY2_WITH_TIMEOUT(capture.m_bytes.contains(QStringLiteral("[TEXT]实时中文好").toUtf8()),
+                                  capture.m_bytes.toHex().constData(), 10000);
+        QVERIFY(backend.writeInput("echX\x7fo command\r").isSuccess());
+        QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains("[ECHO]command"), 10000);
+        QVERIFY(backend.writeInput("cancel-me\x03").isSuccess());
+        QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains("[CTRL_C]"), 10000);
+        QVERIFY(backend.writeInput(QStringLiteral("取消后\r").toUtf8()).isSuccess());
+        QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains(QStringLiteral("[TEXT]取消后").toUtf8()), 10000);
+        QVERIFY(backend.resize({91, 27}).isSuccess());
+        QTest::qWait(100);
+        QVERIFY(backend.writeInput("size\ransi\r").isSuccess());
+        QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains("[SIZE]91x27"), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(capture.m_bytes.contains("[COLOR]"), 10000);
+        // 跨越多行的行编辑交给控制台；提交内容仍完整且只执行一次。
+        const QByteArray longLine(220, 'x');
+        const int textReplies = capture.m_bytes.count("[TEXT]");
+        QVERIFY(backend.writeInput(longLine + "\r").isSuccess());
+        QTRY_COMPARE_WITH_TIMEOUT(capture.m_bytes.count("[TEXT]"), textReplies + 1, 10000);
+        QVERIFY(backend.writeInput("echo after-long-line\rexit\r").isSuccess());
+        QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 15000);
+        capture.drain();
+        QVERIFY(capture.m_bytes.contains("[ECHO]after-long-line"));
+        QVERIFY(capture.m_bytes.contains("[BYE]"));
+        QCOMPARE(qvariant_cast<rad::ExitStatus>(finished.at(0).at(0)).exitCode, 0);
     }
 
     void argumentsAndTail()

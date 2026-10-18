@@ -23,6 +23,7 @@ Result<LaunchSpec> FakeCliProvider::makeLaunchSpec(const SessionRequest &request
         !request.size.validate().isSuccess() || !QDir::isAbsolutePath(workspace.workingDirectory) ||
         !QDir::isAbsolutePath(m_executablePath))
         return Result<LaunchSpec>::failure({ErrorCode::InvalidArgument, QStringLiteral("FakeCli 请求无效")});
-    return Result<LaunchSpec>::success({m_executablePath, {}, workspace.workingDirectory, request.size});
+    return Result<LaunchSpec>::success(
+        {m_executablePath, {QStringLiteral("--interactive")}, workspace.workingDirectory, request.size});
 }
 }

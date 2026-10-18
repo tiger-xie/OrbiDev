@@ -1,6 +1,7 @@
 #include "ClientWindow.h"
 
 #include "../controllers/ClientController.h"
+#include "../terminal/TerminalView.h"
 
 #include <QAction>
 #include <QCloseEvent>
@@ -50,8 +51,13 @@ private:
 
 QString processText(const ClientSession &session, bool connected)
 {
-    const auto state =
-        session.running ? QObject::tr("运行中") : QObject::tr("已退出 · 退出码 %1").arg(session.exitCode);
+    const auto state = session.running         ? QObject::tr("运行中")
+                       : session.exitCodeKnown ? QObject::tr("已退出 · 退出码 %1").arg(session.exitCode)
+                       : session.processState == QStringLiteral("creating") ? QObject::tr("正在创建")
+                       : session.processState == QStringLiteral("exiting")  ? QObject::tr("正在退出")
+                       : session.processState == QStringLiteral("failed")
+                           ? QObject::tr("启动失败")
+                           : QObject::tr("已退出 · 退出码未提供");
     return connected ? state : QObject::tr("最后已知：%1").arg(state);
 }
 QString attachmentText(const ClientSession &session)
@@ -94,15 +100,17 @@ void ClientWindow::setupUi()
                         {
                             QMessageBox::about(
                                 this, tr("关于 RADManager"),
-                                tr("远程 CLI 会话管理器\n\n当前为 FakeAgent "
-                                   "模拟验收模式。\n不连接网络、不启动 CLI。终端将在下一阶段接入。"));
+                                m_controller->isSimulation()
+                                    ? tr("当前为 FakeAgent 模拟模式，不连接网络或启动 CLI。")
+                                    : tr("当前为远程 FakeCli 终端。真实 Claude Provider 尚未接入。"));
                         });
 
     auto *toolbar = addToolBar(tr("主机与会话"));
     toolbar->setMovable(false);
     auto *host = new QComboBox(toolbar);
     host->setObjectName(QStringLiteral("hostCombo"));
-    host->addItem(tr("FakeAgent · 本机模拟"));
+    host->addItem(m_controller->displayName());
+    host->setToolTip(m_controller->displayName());
     host->setMinimumContentsLength(20);
     toolbar->addWidget(host);
     m_connect = new QPushButton(tr("连接"), toolbar);
@@ -203,9 +211,13 @@ void ClientWindow::setupUi()
     emptyHeading->setProperty("role", "heading");
     emptyHeading->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(emptyHeading);
-    auto *emptyDescription = new QLabel(
-        tr("连接 FakeAgent，再从工作区打开或新建会话。\n当前仅验证界面操作；不会连接真实 Agent 或启动 CLI。"),
-        empty);
+    auto *emptyDescription =
+        new QLabel(m_controller->isSimulation()
+                       ? tr("连接 FakeAgent，再从工作区打开或新建会话。\n当前仅验证界面操作；不会连接真实 "
+                            "Agent 或启动 CLI。")
+                       : tr("连接已配置的 Agent，从工作区打开或新建终端。\n工作区访问权限由 Agent "
+                            "校验；关闭窗口不会终止远程进程。"),
+                   empty);
     emptyDescription->setProperty("role", "secondary");
     emptyDescription->setAlignment(Qt::AlignCenter);
     emptyDescription->setWordWrap(true);
@@ -220,7 +232,14 @@ void ClientWindow::setupUi()
     m_tabs->setElideMode(Qt::ElideRight);
     m_workspace->addWidget(m_tabs);
     connect(m_tabs, &QTabWidget::tabCloseRequested, this, &ClientWindow::closeSession);
-    connect(m_tabs, &QTabWidget::currentChanged, this, [this] { updateContext(); });
+    connect(m_tabs, &QTabWidget::currentChanged, this,
+            [this]
+            {
+                updateContext();
+                if (auto *page = m_tabs->currentWidget())
+                    if (auto *terminal = page->findChild<TerminalView *>())
+                        terminal->focusTerminal();
+            });
     m_splitter->setSizes({250, 1030});
     m_splitter->setStretchFactor(0, 0);
     m_splitter->setStretchFactor(1, 1);
@@ -228,7 +247,8 @@ void ClientWindow::setupUi()
     m_status = new QLabel(this);
     m_status->setObjectName(QStringLiteral("sessionStatusLabel"));
     statusBar()->addWidget(m_status, 1);
-    auto *simulation = new QLabel(tr("模拟模式  ·  终端未接入"), this);
+    auto *simulation = new QLabel(
+        m_controller->isSimulation() ? tr("模拟模式  ·  终端未接入") : tr("远程终端  ·  FakeCli"), this);
     simulation->setProperty("role", "secondary");
     statusBar()->addPermanentWidget(simulation);
     setCentralWidget(central);
@@ -254,8 +274,15 @@ void ClientWindow::showSession(const QString &id)
     {
         if (m_tabs->widget(index)->property("sessionId").toString() == id)
         {
+            if (!m_controller->isSimulation() && !m_controller->terminalIsReady(id))
+            {
+                removeSession(id);
+                break;
+            }
             m_tabs->setCurrentIndex(index);
             updateContext();
+            if (auto *terminal = m_tabs->widget(index)->findChild<TerminalView *>())
+                terminal->focusTerminal();
             return;
         }
     }
@@ -274,17 +301,46 @@ void ClientWindow::showSession(const QString &id)
         summary->setWordWrap(true);
         summary->setTextFormat(Qt::PlainText);
         layout->addWidget(summary);
-        auto *notice = new QLabel(tr("终端将在下一阶段接入"), page);
-        notice->setProperty("role", "heading");
-        layout->addSpacing(40);
-        layout->addWidget(notice);
-        auto *description = new QLabel(tr("这里将显示此会话的真实终端。\n当前可验证新建、附加、分离与终止；Fa"
-                                          "keAgent 不会运行任何进程。"),
-                                       page);
-        description->setProperty("role", "secondary");
-        description->setWordWrap(true);
-        layout->addWidget(description);
-        layout->addStretch();
+        if (m_controller->isSimulation())
+        {
+            auto *notice = new QLabel(tr("模拟模式不启动终端"), page);
+            notice->setProperty("role", "heading");
+            layout->addSpacing(40);
+            layout->addWidget(notice);
+            layout->addWidget(new QLabel(tr("使用 --agent-url 和 --workspace 配置真实 Agent 连接。"), page));
+            layout->addStretch();
+        }
+        else
+        {
+            summary->hide();
+            layout->setContentsMargins(0, 0, 0, 0);
+            auto *inputHint = new QLabel(page);
+            inputHint->setObjectName(QStringLiteral("terminalInputHint"));
+            inputHint->setWordWrap(true);
+            inputHint->setTextFormat(Qt::PlainText);
+            inputHint->setMargin(8);
+            layout->addWidget(inputHint);
+            auto *terminal = new TerminalView(page);
+            layout->addWidget(terminal, 1);
+            connect(m_controller, &ClientController::outputReady, terminal,
+                    [terminal, id](const QString &sourceId, const QByteArray &bytes)
+                    {
+                        if (sourceId == id)
+                            terminal->appendOutput(bytes);
+                    });
+            connect(terminal, &TerminalView::inputReady, this,
+                    [this, id](const QByteArray &bytes) { m_controller->sendInput(id, bytes); });
+            connect(terminal, &TerminalView::terminalResized, this,
+                    [this, id](int columns, int rows) { m_controller->resizeTerminal(id, columns, rows); });
+            connect(terminal, &TerminalView::ready, this,
+                    [this, terminal, id]
+                    {
+                        m_controller->terminalReady(id);
+                        if (currentSessionId() == id)
+                            terminal->focusTerminal();
+                    });
+            connect(terminal, &TerminalView::failed, m_controller, &ClientController::terminalFailed);
+        }
         const int index = m_tabs->addTab(page, session.name);
         auto *closeButton = new QToolButton(m_tabs->tabBar());
         closeButton->setObjectName(QStringLiteral("sessionTabCloseButton"));
@@ -319,7 +375,10 @@ void ClientWindow::refreshUi()
 {
     const bool connected = m_controller->isConnected();
     const bool busy = m_controller->isBusy();
-    m_connection->setText(busy ? tr("◌ 正在处理…") : connected ? tr("● 已连接 · 模拟") : tr("○ 未连接"));
+    m_connection->setText(busy ? tr("◌ 正在处理…")
+                          : connected
+                              ? (m_controller->isSimulation() ? tr("● 已连接 · 模拟") : tr("● 已连接"))
+                              : tr("○ 未连接"));
     m_connect->setText(connected ? tr("断开") : tr("连接"));
     m_connect->setEnabled(!busy);
     m_create->setEnabled(connected && !busy);
@@ -360,8 +419,7 @@ void ClientWindow::updateContext()
     const bool ready = connected && !m_controller->isBusy();
     const auto id = currentSessionId();
     m_context->setText(tr("会话工作区"));
-    m_status->setText(connected ? tr("已连接 FakeAgent · 选择会话以查看控制权")
-                                : tr("未连接 · 不发送会话操作"));
+    m_status->setText(connected ? tr("已连接 Agent · 选择会话以查看控制权") : tr("未连接 · 不发送会话操作"));
     bool detachable = false;
     bool terminable = false;
     const auto sessions = m_controller->sessions();
@@ -372,6 +430,18 @@ void ClientWindow::updateContext()
             auto *page = m_tabs->widget(index);
             if (page->property("sessionId").toString() == session.id)
             {
+                if (auto *terminal = page->findChild<TerminalView *>())
+                    terminal->setInputEnabled(connected && session.attached && session.running &&
+                                              !session.readOnly);
+                if (auto *hint = page->findChild<QLabel *>(QStringLiteral("terminalInputHint")))
+                {
+                    const bool readOnly = connected && session.attached && session.readOnly;
+                    const bool fake = session.provider == QStringLiteral("fake");
+                    hint->setText(readOnly
+                                      ? tr("当前会话只读，不能输入。可先分离，再打开会话重新申请控制权。")
+                                      : tr("可直接输入中文或粘贴，输入内容实时显示；按 Enter 提交。"));
+                    hint->setVisible(readOnly || fake);
+                }
                 page->findChild<QLabel *>(QStringLiteral("sessionSummary"))
                     ->setText(tr("%1\n\n%2  ·  %3\n会话 ID：%4")
                                   .arg(session.name, processText(session, connected), attachmentText(session),
@@ -398,7 +468,7 @@ void ClientWindow::createSession()
         return;
     CreateSessionDialog dialog(m_controller, this);
     dialog.setObjectName(QStringLiteral("createSessionDialog"));
-    dialog.setWindowTitle(tr("新建模拟会话"));
+    dialog.setWindowTitle(m_controller->isSimulation() ? tr("新建模拟会话") : tr("新建远程会话"));
     dialog.resize(460, 260);
     auto *layout = new QVBoxLayout(&dialog);
     auto *form = new QFormLayout;
@@ -416,7 +486,9 @@ void ClientWindow::createSession()
     provider->addItem(QStringLiteral("FakeCli"));
     form->addRow(tr("Provider"), provider);
     layout->addLayout(form);
-    auto *error = new QLabel(tr("仅创建模拟记录，不启动真实 CLI。"), &dialog);
+    auto *error = new QLabel(m_controller->isSimulation() ? tr("仅创建模拟记录，不启动真实 CLI。")
+                                                          : tr("将在 Agent 授权工作区创建 FakeCli 进程。"),
+                             &dialog);
     error->setObjectName(QStringLiteral("createErrorLabel"));
     error->setWordWrap(true);
     error->setTextFormat(Qt::PlainText);
@@ -448,7 +520,7 @@ void ClientWindow::createSession()
                 workspace->setEnabled(ready);
                 confirm->setEnabled(ready && !name->text().trimmed().isEmpty());
                 cancel->setEnabled(!m_controller->isBusy());
-                error->setText(m_controller->isBusy() ? tr("正在创建模拟会话…") : m_controller->error());
+                error->setText(m_controller->isBusy() ? tr("正在创建会话…") : m_controller->error());
             });
     name->setFocus();
     dialog.exec();
@@ -464,7 +536,7 @@ void ClientWindow::closeSession(int index)
         return;
     }
     QMessageBox choice(QMessageBox::Question, tr("关闭会话标签"),
-                       tr("分离只关闭当前标签，模拟会话仍保持原状态。"), QMessageBox::NoButton, this);
+                       tr("分离只关闭当前标签，会话仍保持原状态。"), QMessageBox::NoButton, this);
     choice.setObjectName(QStringLiteral("closeSessionDialog"));
     auto *detach = choice.addButton(tr("分离"), QMessageBox::AcceptRole);
     auto *terminate = choice.addButton(tr("终止…"), QMessageBox::DestructiveRole);
@@ -491,7 +563,7 @@ void ClientWindow::confirmTerminate(const QString &id)
         if (session.id == id)
             name = session.name;
     QMessageBox confirmation(QMessageBox::Warning, tr("确认终止会话"),
-                             tr("确定终止“%1”？\n终止会结束该模拟会话，不能通过重新附加恢复运行。").arg(name),
+                             tr("确定终止“%1”？\n终止会结束该会话，不能通过重新附加恢复运行。").arg(name),
                              QMessageBox::Yes | QMessageBox::No, this);
     confirmation.setObjectName(QStringLiteral("terminateSessionDialog"));
     confirmation.setTextFormat(Qt::PlainText);

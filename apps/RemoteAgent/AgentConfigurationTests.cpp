@@ -110,7 +110,7 @@ private slots:
         rad::WorkspaceContext workspace{request.workspaceId, QStringLiteral("C:/workspace")};
         const auto launch = provider.makeLaunchSpec(request, workspace);
         QVERIFY(launch.isSuccess());
-        QVERIFY(launch.value().arguments.isEmpty());
+        QCOMPARE(launch.value().arguments, QStringList{QStringLiteral("--interactive")});
         QCOMPARE(launch.value().executablePath, QStringLiteral("C:/fixtures/FakeCli.exe"));
         request.worktreeName = QStringLiteral("untrusted");
         QVERIFY(!provider.makeLaunchSpec(request, workspace).isSuccess());

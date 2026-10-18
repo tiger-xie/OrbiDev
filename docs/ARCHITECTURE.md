@@ -6,7 +6,7 @@
 |---|---|---|
 | RADCore | core/model、core/terminal、core/provider、core/session | QtCore；编译基线、会话值模型、错误结果、抽象接口及 SessionManager，不包含平台实现或 UI |
 | RADProtocol | core/protocol | QtCore；RADP/1 DTO、JSON/二进制编解码与校验；不包含网络、会话实现或 Qt GUI |
-| RemoteClient | apps/RemoteClient | RADClientUi、RADCore、RADProtocol、Qt Widgets/WebEngineWidgets；基础界面及独立 WebEngine 烟测 |
+| RemoteClient | apps/RemoteClient | RADClientUi、RADClientTransport、RADTerminalView；原生界面、认证连接与离线终端 |
 | RemoteAgent | apps/RemoteAgent | 配置与组装；--config 启动 RADAgentTransport、SessionManager、固定 FakeCli Provider 和 Windows 后端；保留 SQLite 烟测 |
 | RADTests | tests/unit | Qt Test；验证加载的 Qt 版本、位数、语言标准及库目标可链接 |
 | RADSessionContractTests | tests/unit | Qt Test；值校验及内存替身的接口契约，不代表生产会话实现 |
@@ -24,11 +24,11 @@
 
 ## 本轮计划调整
 
-用户确认当前电脑为公司端，并已准备家庭测试电脑，Claude CLI 可用、Tailscale 已连接（用户提供证据，非代理跨端验证）。后续优先在该机联调远程 CLI；NAS 不参与终端链路，保留未来 Git 托管规划。正式出口/Fail Closed 与 NAS 验收延期，双端路径和 Agent 端口仍待验证。项目按原里程碑继续开发，此前已提交网络规划文档；当前实现范围已扩展至 M4-01 FakeAgent 客户端界面；跨端网络仍待实测。
+用户确认当前电脑为公司端，并已准备家庭测试电脑，Claude CLI 可用、Tailscale 已连接（用户提供证据，非代理跨端验证）。后续优先在该机联调远程 CLI；NAS 不参与终端链路，保留未来 Git 托管规划。正式出口/Fail Closed 与 NAS 验收延期，双端路径和 Agent 端口仍待验证。项目按原里程碑继续开发，此前已提交网络规划文档；当前实现范围已扩展至 M4-02 远程 FakeCli 终端；跨端网络仍待实测。
 
 ## 运行与错误边界
 
-- Client 默认显示原生基础界面，以内存 FakeAgent 验证会话操作；无网络或终端交互。--smoke-test 单独打开原 WebEngine 内嵌页面，CSP 不允许外部资源。
+- Client 默认显示原生基础界面，以内存 FakeAgent 验证会话操作；指定 --agent-url 和 --workspace 后切换真实网络终端。--smoke-test 单独打开原 WebEngine 内嵌页面，CSP 不允许外部资源。
 - Agent 默认说明当前未监听后退出；显式 --config 才进入经鉴权的常驻服务。`--smoke-test` 才创建 SQLite 内存数据库，不写业务数据文件。
 - 两个程序的 `--smoke-test` 必须通过真实运行检查后返回 0；失败返回非零，Client 有超时限制。
 - M0 的 detach、持久化、鉴权等约束不因建立工程骨架而改变。
@@ -67,4 +67,10 @@ RADAgentTransport 位于 core/transport，依赖 RADCore、RADProtocol、Qt Netw
 
 ## M4-01 客户端基础界面
 
-RADClientUi 位于 apps/RemoteClient，包含 ClientWindow、ClientController、FakeAgent 与集中 Theme；只依赖 Qt Widgets。UI 操作由协调器串行提交，按会话 ID 去重；分离成功才移除标签，关闭窗口仅断开。FakeAgent 为验收替身，不承担身份认证或生产会话管理。真实协议接入留给 M4-02，详见 [M4-01 说明](M4-01_QtClient基础界面.md)。
+RADClientUi 位于 apps/RemoteClient，包含 ClientWindow、ClientController、FakeAgent 与集中 Theme；通过 IAgentClient 接口隔离模拟与网络实现，M4-02 增加 RADTerminalView。UI 操作由协调器串行提交，按会话 ID 去重；分离成功才移除标签，关闭窗口仅断开。FakeAgent 为验收替身，不承担身份认证或生产会话管理。基础界面验收详见 [M4-01 说明](M4-01_QtClient基础界面.md)。
+
+## M4-02 远程终端
+
+RADClientTransport 位于 core/transport，实现 QtCore 的 IAgentClient 契约，依赖现有 RADProtocol、Qt Network/WebSockets。RADTerminalView 属于 apps/RemoteClient，以离线 QRC、WebChannel 和 xterm 处理字节与显示。ClientWindow 不启动 Provider 或 ConPTY；ClientController 处理页面加载前缓冲及尺寸请求合并。
+
+输入权限来自附加状态和写者身份；窗口关闭只断开连接。输出序号缺口、缓冲超限或渲染失败明确报错，均不终止远端进程。凭据仅在内存中，连接地址仅允许回环或 Tailscale IPv4。源码、启动与验证边界见 [M4-02 说明](M4-02_远程终端集成.md) 和 [ADR-019](ADR/019_Client远程终端.md)。

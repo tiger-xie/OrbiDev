@@ -1,29 +1,16 @@
 #pragma once
 
 #include <QHash>
-#include <QObject>
 #include <QStringList>
 #include <QVector>
+#include <client/IAgentClient.h>
 #include <functional>
 
 namespace rad::client
 {
-struct ClientSession
-{
-    QString id;
-    QString name;
-    QString workspace;
-    QString provider = QStringLiteral("FakeCli");
-    bool running = true;
-    bool attached = false;
-    bool readOnly = true;
-    bool writerAvailable = true;
-    int exitCode = 0;
-};
-
 /// 仅用于界面验收的模拟 Agent，不启动进程、不访问网络。
 /// 所有调用及回调均在所属线程；请求异步完成一次。销毁取消尚未完成的请求。
-class FakeAgent final : public QObject
+class FakeAgent final : public IAgentClient
 {
     Q_OBJECT
 public:
@@ -38,20 +25,35 @@ public:
     };
     using Completion = std::function<void(const QString &error, const QString &sessionId)>;
     explicit FakeAgent(QObject *parent = nullptr);
-    bool isConnected() const;
-    QVector<ClientSession> sessions() const;
-    QStringList workspaces() const;
+    bool isConnected() const override;
+    bool isSimulation() const override
+    {
+        return true;
+    }
+    QString displayName() const override
+    {
+        return tr("FakeAgent · 本机模拟");
+    }
+    bool sendInput(const QString &, const QByteArray &, QString &error) override
+    {
+        error = tr("模拟模式没有终端输入。");
+        return false;
+    }
+    void resizeSession(const QString &id, int, int, Completion completion) override
+    {
+        completion({}, id);
+    }
+    QVector<ClientSession> sessions() const override;
+    QStringList workspaces() const override;
     int terminateCount() const;
     void failNext(Operation operation, const QString &message);
-    void connectAgent(Completion completion);
-    void disconnectAgent();
-    void listSessions(Completion completion);
-    void createSession(const QString &name, const QString &workspace, Completion completion);
-    void attachSession(const QString &id, Completion completion);
-    void detachSession(const QString &id, Completion completion);
-    void terminateSession(const QString &id, Completion completion);
-signals:
-    void disconnected();
+    void connectAgent(Completion completion) override;
+    void disconnectAgent() override;
+    void listSessions(Completion completion) override;
+    void createSession(const QString &name, const QString &workspace, Completion completion) override;
+    void attachSession(const QString &id, Completion completion) override;
+    void detachSession(const QString &id, Completion completion) override;
+    void terminateSession(const QString &id, Completion completion) override;
 
 private:
     void request(Operation operation, const QString &id, Completion completion,

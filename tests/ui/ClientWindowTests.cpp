@@ -1,4 +1,5 @@
 #include <controllers/ClientController.h>
+#include <controllers/FakeAgent.h>
 #include <ui/ClientWindow.h>
 #include <ui/Theme.h>
 

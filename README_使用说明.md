@@ -1,5 +1,9 @@
 # RADManager · 开发计划资料包
 
+## 本机快速启动
+
+编译 Debug 后，在仓库根目录先双击 **[Start-RemoteAgent.cmd](Start-RemoteAgent.cmd)**，保留窗口，再双击 **[Start-RemoteClient.cmd](Start-RemoteClient.cmd)**。Client 打开后点击“连接”→“新建会话”，即可验证真实 FakeCli 终端。脚本自动处理 Qt 路径、联调配置与设备令牌，无需手填参数。Release 启动和详细步骤见 [启动说明](docs/M4-02_远程终端集成.md#推荐本机双击启动)。
+
 ## 当前可运行原型
 
 M0-02 已实现本地离线终端演示，运行本机构建目录 `build-terminal-deploy/TerminalPoc.exe`。构建、自测及人工验收步骤见 [Qt 终端技术验证](docs/M0-02_Qt终端技术验证.md)。这是本地模拟终端，不执行系统命令，也不连接远程 Agent；用户已确认 M0-02 验收通过，具体记录见验证说明。
@@ -10,7 +14,7 @@ M1-01 已建立 Client/Agent、Core/Protocol 和 Qt Test 目标，本机 Debug/R
 
 ## 文件使用顺序
 
-M1-02 已定义核心模型、Provider/终端/会话管理接口，测试入口及生产实现边界见 [核心模型与接口](docs/M1-02_核心模型与接口.md)。应用界面已进入 M4-01 FakeAgent 基础界面；真实 Claude 和附件功能尚未接入；FakeCli 服务见下方 M3-02。
+M1-02 已定义核心模型、Provider/终端/会话管理接口，测试入口及生产实现边界见 [核心模型与接口](docs/M1-02_核心模型与接口.md)。应用界面已进入 M4-02 远程 FakeCli 终端；真实 Claude 和附件功能尚未接入；FakeCli 服务见下方 M3-02。
 
 - `01_RADManager_完整开发计划.md`：总规格；先由项目负责人审核，明确范围和架构。
 - `AGENTS.md`：放到 Codex 直接工作的 Git 仓库**根目录**，作为持续有效的工程规则。
@@ -43,8 +47,12 @@ RADP/1 提供控制消息、终端二进制帧、版本协商及错误协议，�
 
 ## M3-02 Agent WebSocket 服务
 
-使用 --config 加载本地设备摘要、工作区 ACL 与固定 FakeCli 配置，启动经鉴权的常驻 Agent。配置、协议步骤及本机验收见 [M3-02 说明](docs/M3-02_AgentWebSocket服务.md)。默认无配置仍不监听；不自动配置 Tailscale/防火墙，不包含真实 Claude 或远程 UI。
+使用 --config 加载本地设备摘要、工作区 ACL 与固定 FakeCli 配置，启动经鉴权的常驻 Agent。配置、协议步骤及本机验收见 [M3-02 说明](docs/M3-02_AgentWebSocket服务.md)。默认无配置仍不监听；不自动配置 Tailscale/防火墙，不包含真实 Claude；远程 UI 由下方 M4-02 提供。
 
 ## M4-01 Qt Client 基础界面
 
-RemoteClient 默认打开深灰/青绿色原生窗口，支持 FakeAgent 主机状态、项目会话树、多标签、新建、分离和终止确认。界面明确标注模拟，不连接真实 Agent；启动与验证见 [M4-01 说明](docs/M4-01_QtClient基础界面.md)。终端交互留给 M4-02。
+RemoteClient 默认打开深灰/青绿色原生窗口，支持 FakeAgent 主机状态、项目会话树、多标签、新建、分离和终止确认。界面明确标注模拟，不连接真实 Agent；启动与验证见 [M4-01 说明](docs/M4-01_QtClient基础界面.md)。指定连接参数后的真实终端见下方 M4-02。
+
+## M4-02 远程终端
+
+RemoteClient 使用 `--agent-url ws://127.0.0.1:17890/ --workspace demo` 启动远程模式，弹窗输入 Agent 设备令牌后点击连接。工作区 ID 必须与 Agent 配置和权限一致。支持多个真实 FakeCli 终端、中文/ANSI、输入热键、复制粘贴与尺寸同步；关闭客户端保留远端进程。默认无参数仍是模拟模式。配置、源码和人工验收步骤见 [M4-02 说明](docs/M4-02_远程终端集成.md)。

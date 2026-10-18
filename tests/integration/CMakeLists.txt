@@ -5,7 +5,7 @@ target_link_libraries(WinConPtyBackendTests PRIVATE RADWindowsTerminal Qt5::Test
 add_dependencies(WinConPtyBackendTests FakeCli)
 rad_deploy_conpty(WinConPtyBackendTests)
 
-foreach(scenario integration argumentsAndTail validation lifecycleStress concurrency backpressure processCleanup)
+foreach(scenario integration interactiveInput argumentsAndTail validation lifecycleStress concurrency backpressure processCleanup)
     add_test(NAME backend.${scenario} COMMAND ${CMAKE_COMMAND} -E env
         "PATH=${RAD_QT_BIN};$ENV{PATH}"
         "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
@@ -38,3 +38,24 @@ add_test(NAME agent.websocket COMMAND ${CMAKE_COMMAND} -E env
     $<TARGET_FILE:AgentWebSocketServerTests>
     -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/agent-websocket.xml,junitxml")
 set_tests_properties(agent.websocket PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+
+add_executable(RADWebSocketAgentClientTests WebSocketAgentClientTests.cpp)
+rad_configure_target(RADWebSocketAgentClientTests)
+target_link_libraries(RADWebSocketAgentClientTests PRIVATE RADClientTransport RADAgentTransport RADWindowsTerminal Qt5::Test)
+add_dependencies(RADWebSocketAgentClientTests FakeCli WinConPtyBackendTestsRuntime)
+add_test(NAME client.websocket COMMAND ${CMAKE_COMMAND} -E env
+    "PATH=${RAD_QT_BIN};$ENV{PATH}" "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
+    $<TARGET_FILE:RADWebSocketAgentClientTests>
+    -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/client-websocket.xml,junitxml")
+set_tests_properties(client.websocket PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+
+add_executable(RADRemoteTerminalTests RemoteTerminalTests.cpp)
+rad_configure_target(RADRemoteTerminalTests)
+target_link_libraries(RADRemoteTerminalTests PRIVATE RADClientUi RADClientTransport RADAgentTransport RADWindowsTerminal Qt5::Test)
+add_dependencies(RADRemoteTerminalTests FakeCli WinConPtyBackendTestsRuntime)
+add_test(NAME client.remote-terminal COMMAND ${CMAKE_COMMAND} -E env
+    "PATH=${RAD_QT_BIN};$ENV{PATH}" "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
+    "RAD_CLIENT_SCREENSHOT=${PROJECT_BINARY_DIR}/m4-02-remote-$<CONFIG>.png"
+    $<TARGET_FILE:RADRemoteTerminalTests>
+    -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/remote-terminal.xml,junitxml")
+set_tests_properties(client.remote-terminal PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)

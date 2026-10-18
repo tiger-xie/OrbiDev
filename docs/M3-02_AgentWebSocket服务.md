@@ -12,7 +12,7 @@
 | [AgentWebSocketServer.cpp](../core/transport/AgentWebSocketServer.cpp) | 设备鉴权、RADP 路由、连接清理和背压 |
 | [AgentConfiguration.cpp](../apps/RemoteAgent/AgentConfiguration.cpp) | 本地配置文件校验 |
 | [main.cpp](../apps/RemoteAgent/main.cpp) | 组装服务、SessionManager 与后端，控制台退出 |
-| [FakeCliProvider.cpp](../providers/FakeCli/FakeCliProvider.cpp) | 固定可执行文件与空参数模板，不接受远程命令 |
+| [FakeCliProvider.cpp](../providers/FakeCli/FakeCliProvider.cpp) | 固定可执行文件与 `--interactive` 参数模板，不接受远程命令 |
 | [AgentConfigurationTests.cpp](../apps/RemoteAgent/AgentConfigurationTests.cpp) | 配置与 Provider 参数校验 |
 | [AgentWebSocketServerTests.cpp](../tests/integration/AgentWebSocketServerTests.cpp) | 真实 WebSocket 与 ConPTY 集成验收 |
 | [ADR-017](ADR/017_AgentWebSocket服务.md) | 身份、会话与网络边界 |

@@ -22,3 +22,9 @@ add_library(RADAgentTransport STATIC transport/AgentWebSocketServer.h transport/
 target_include_directories(RADAgentTransport PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(RADAgentTransport PUBLIC RADCore Qt5::Network PRIVATE RADProtocol Qt5::WebSockets)
 rad_configure_target(RADAgentTransport)
+
+target_sources(RADCore PRIVATE client/IAgentClient.h)
+add_library(RADClientTransport STATIC transport/WebSocketAgentClient.h transport/WebSocketAgentClient.cpp)
+rad_configure_target(RADClientTransport)
+target_include_directories(RADClientTransport PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(RADClientTransport PUBLIC RADCore PRIVATE RADProtocol Qt5::Network Qt5::WebSockets)

@@ -1,7 +1,10 @@
 #pragma once
 
-#include "FakeAgent.h"
+#include <QHash>
 #include <QPointer>
+#include <QSet>
+#include <QSize>
+#include <client/IAgentClient.h>
 
 namespace rad::client
 {
@@ -11,8 +14,15 @@ class ClientController final : public QObject
 {
     Q_OBJECT
 public:
-    explicit ClientController(FakeAgent *agent, QObject *parent = nullptr);
+    explicit ClientController(IAgentClient *agent, QObject *parent = nullptr);
     bool isConnected() const;
+    bool isSimulation() const;
+    QString displayName() const;
+    void sendInput(const QString &id, const QByteArray &bytes);
+    void resizeTerminal(const QString &id, int columns, int rows);
+    void terminalReady(const QString &id);
+    bool terminalIsReady(const QString &id) const;
+    void terminalFailed(const QString &message);
     bool isBusy() const;
     QVector<ClientSession> sessions() const;
     QStringList workspaces() const;
@@ -26,6 +36,7 @@ public:
     void terminateSession(const QString &id);
 signals:
     void changed();
+    void outputReady(const QString &id, const QByteArray &bytes);
     void sessionOpened(const QString &id);
     void sessionCreated(const QString &id);
     void sessionDetached(const QString &id);
@@ -33,11 +44,15 @@ signals:
 
 private:
     bool begin(bool requireConnection = true);
-    FakeAgent::Completion completion(const QString &action);
-    FakeAgent *m_agent;
+    IAgentClient::Completion completion(const QString &action);
+    IAgentClient *m_agent;
     QVector<ClientSession> m_sessions;
     QString m_error;
     bool m_busy = false;
     quint64 m_generation = 0;
+    QHash<QString, QByteArray> m_pendingOutput;
+    QSet<QString> m_readyTerminals;
+    QSet<QString> m_resizePending;
+    QHash<QString, QSize> m_latestSizes;
 };
 }

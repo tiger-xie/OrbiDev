@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' qrc:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'">
+  <title>RADManager 远程终端</title>
+  <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="client-terminal.css">
+</head>
+<body>
+  <div id="terminal" aria-label="远程会话终端"></div>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script src="vendor/xterm.js"></script>
+  <script src="vendor/xterm-addon-fit.js"></script>
+  <script src="client-terminal.js"></script>
+</body>
+</html>

@@ -15,3 +15,5 @@ npm run verify
 上述旧包名称已被 npm 标记 deprecated；新包名为 @xterm/xterm 和 @xterm/addon-fit。这是当前旧 Qt 内核的兼容性 POC，不是长期维护或安全支持承诺，不自动升级为最新版。
 
 `terminal.js` 负责显示、输入及确认，`self-test.js` 只在宿主传入 `--self-test` 时运行。QWebChannel 采用异步调用；输出写入 xterm 完成后才确认，宿主据此推进压力输出。复制返回选择文本，粘贴由 Qt 读取系统剪贴板后通过 JSON 传入，不开放网页剪贴板权限。
+
+M4-02 产品终端使用独立的 `client-index.html` / `client-terminal.js` / `client-terminal.css` / `client-terminal.qrc`，复用同一 vendor 版本；不加载 POC 自测脚本。宿主是 `apps/RemoteClient/terminal/TerminalView`，网络权限保留在 C++ 客户端层，详见 [M4-02 说明](../../docs/M4-02_远程终端集成.md)。

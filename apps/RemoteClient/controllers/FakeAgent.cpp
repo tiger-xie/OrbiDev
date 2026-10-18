@@ -6,7 +6,7 @@
 
 namespace rad::client
 {
-FakeAgent::FakeAgent(QObject *parent) : QObject(parent)
+FakeAgent::FakeAgent(QObject *parent) : IAgentClient(parent)
 {
     m_sessions = {{QStringLiteral("demo-terminal"), tr("终端验证"), QStringLiteral("OrbiDev")},
                   {QStringLiteral("demo-network"), tr("网络调试"), QStringLiteral("OrbiDev")},

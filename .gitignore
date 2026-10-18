@@ -2,3 +2,4 @@
 /.vs/
 /CMakeUserPresets.json
 /frontend/terminal/node_modules/
+/.local-run/
