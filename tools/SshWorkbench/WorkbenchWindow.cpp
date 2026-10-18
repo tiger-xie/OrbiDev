@@ -22,7 +22,9 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTimer>
+#include <QUuid>
 #include <QVBoxLayout>
+#include <algorithm>
 
 namespace sshworkbench
 {
@@ -103,7 +105,8 @@ void WorkbenchWindow::buildUi()
     m_newTerminal = new QPushButton(tr("新建终端"), central);
     m_newTerminal->setObjectName(QStringLiteral("newTerminalButton"));
     m_newTerminal->setProperty("role", "primary");
-    connect(m_newTerminal, &QPushButton::clicked, this, &WorkbenchWindow::openCurrent);
+    connect(m_newTerminal, &QPushButton::clicked, this, [this] { openCurrent(true); });
+    m_newTerminal->setToolTip(tr("为选中项目额外创建一个 SSH 会话"));
     toolbar->addWidget(m_newTerminal);
     root->addLayout(toolbar);
     m_feedback = new QLabel(central);
@@ -121,7 +124,7 @@ void WorkbenchWindow::buildUi()
     auto *title = new QLabel(tr("项目"), rail);
     title->setProperty("role", "section");
     railLayout->addWidget(title);
-    auto *hint = new QLabel(tr("勾选项目，可一次打开多个终端"), rail);
+    auto *hint = new QLabel(tr("双击切换已有终端；勾选后可批量打开"), rail);
     hint->setProperty("role", "muted");
     hint->setWordWrap(true);
     railLayout->addWidget(hint);
@@ -181,6 +184,12 @@ void WorkbenchWindow::buildUi()
     m_tabs->setObjectName(QStringLiteral("terminalTabs"));
     m_tabs->setTabsClosable(true);
     m_tabs->setMovable(true);
+    connect(m_tabs, &QTabWidget::currentChanged, this,
+            [this](int index)
+            {
+                if (auto *page = m_tabs->widget(index))
+                    page->setProperty("lastActivated", QVariant::fromValue(++m_activationSerial));
+            });
     connect(m_tabs, &QTabWidget::tabCloseRequested, this, &WorkbenchWindow::closeTerminal);
     m_workspace->addWidget(m_tabs);
     splitter->addWidget(rail);
@@ -206,7 +215,7 @@ bool WorkbenchWindow::reloadProfile()
         m_profile = profile;
         m_host->setText(
             tr("%1@%2:%3  ·  已配置，连接状态见终端").arg(profile.user, profile.host).arg(profile.port));
-        showFeedback(tr("主机配置已加载。打开终端会建立新的 SSH 会话。"));
+        showFeedback(tr("主机配置已加载。双击项目切换已有终端，“新建终端”额外创建会话。"));
     }
     else
     {
@@ -224,7 +233,7 @@ void WorkbenchWindow::loadProjects(const QString &legacyPath)
     if (source.isEmpty() || !QFileInfo::exists(source))
         return;
     QString error;
-    m_projectsReadable = launcher::loadConfiguration(source, m_configuration, error);
+    m_projectsReadable = launcher::loadProjectConfiguration(source, m_configuration, error);
     if (!m_projectsReadable)
         showFeedback(tr("项目配置未加载，原文件保留：%1").arg(error), true);
     else if (source != m_projectsPath)
@@ -262,9 +271,10 @@ bool WorkbenchWindow::saveProjects(const launcher::Configuration &configuration)
     QString error;
     if (!QDir().mkpath(QFileInfo(m_projectsPath).absolutePath()))
         error = tr("无法创建项目配置目录。");
-    else if (launcher::saveConfiguration(m_projectsPath, configuration, error))
+    else if (launcher::saveProjectConfiguration(m_projectsPath, configuration, error))
     {
         m_configuration = configuration;
+        m_projectsPersisted = true;
         showFeedback(tr("项目已保存。编辑目录不影响已经打开的终端。"));
         return true;
     }
@@ -310,10 +320,14 @@ void WorkbenchWindow::editProject(bool add)
                 auto next = m_configuration;
                 launcher::Project project{name->text().trimmed(), directory->text().trimmed(), true};
                 if (add)
+                {
+                    project.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
                     next.projects.append(project);
+                }
                 else
                 {
                     project.enabled = next.projects[row].enabled;
+                    project.id = next.projects[row].id;
                     next.projects[row] = project;
                 }
                 QString error;
@@ -346,9 +360,9 @@ void WorkbenchWindow::removeProject()
         renderProjects();
 }
 
-void WorkbenchWindow::openCurrent()
+void WorkbenchWindow::openCurrent(bool createNew)
 {
-    if (m_preview || !reloadProfile())
+    if (m_preview || m_closing || !reloadProfile())
         return;
     const int row = m_projects->currentRow();
     if (row < 0)
@@ -356,12 +370,16 @@ void WorkbenchWindow::openCurrent()
         showFeedback(tr("请先添加并选择一个项目。"));
         return;
     }
-    openProject(m_configuration.projects[row]);
+    if (!m_projectsPersisted && !saveProjects(m_configuration))
+        return;
+    openProject(m_configuration.projects[row], createNew);
 }
 
 void WorkbenchWindow::openSelected()
 {
-    if (m_preview || !reloadProfile())
+    if (m_preview || m_closing || !reloadProfile())
+        return;
+    if (!m_projectsPersisted && !saveProjects(m_configuration))
         return;
     bool selected = false;
     for (const auto &project : m_configuration.projects)
@@ -374,14 +392,53 @@ void WorkbenchWindow::openSelected()
         showFeedback(tr("请先勾选需要打开的项目。"));
 }
 
-void WorkbenchWindow::openProject(const launcher::Project &project)
+void WorkbenchWindow::openProject(const launcher::Project &project, bool createNew)
 {
+    if (m_closing || m_preview)
+        return;
+    // 保存创建时的目标快照；改名不改变身份，改目录或连接则不能复用旧会话。
+    const QStringList target{project.id,
+                             project.directory,
+                             m_profile.host,
+                             m_profile.user,
+                             QString::number(m_profile.port),
+                             m_profile.identityFile,
+                             m_profile.hostFingerprint};
+    QWidget *existing = nullptr;
+    quint64 latest = 0;
+    if (!createNew && !project.id.isEmpty())
+        for (int i = 0; i < m_tabs->count(); ++i)
+        {
+            auto *candidate = m_tabs->widget(i);
+            auto *session = candidate->findChild<SshSession *>();
+            const auto previousTarget = candidate->property("sessionTarget").toStringList();
+            if (candidate->property("sessionClosing").toBool() ||
+                candidate->property("terminalFailed").toBool() ||
+                !std::equal(previousTarget.cbegin(), previousTarget.cend(), target.cbegin(), target.cend()) ||
+                !(candidate->property("sessionPending").toBool() || (session && session->isActive())))
+                continue;
+            const auto activated = candidate->property("lastActivated").toULongLong();
+            if (!existing || activated > latest)
+            {
+                existing = candidate;
+                latest = activated;
+            }
+        }
+    if (existing)
+    {
+        m_tabs->setCurrentWidget(existing);
+        existing->setProperty("lastActivated", QVariant::fromValue(++m_activationSerial));
+        if (auto *terminal = existing->findChild<rad::client::TerminalView *>())
+            terminal->focusTerminal();
+        return;
+    }
     if (m_tabs->count() >= 16)
     {
         showFeedback(tr("最多同时保留 16 个终端标签，请先关闭不再使用的标签。"), true);
         return;
     }
     auto *page = new QWidget(m_tabs);
+    page->setProperty("sessionTarget", target);
     page->setProperty("sessionPending", true);
     page->setProperty("columns", 120);
     page->setProperty("rows", 32);
@@ -453,6 +510,7 @@ void WorkbenchWindow::openProject(const launcher::Project &project)
             [this, page, status, session, name](const QString &error)
             {
                 page->setProperty("sessionPending", false);
+                page->setProperty("terminalFailed", true);
                 session->stop();
                 status->setText(error);
                 page->setProperty("sessionError", error);

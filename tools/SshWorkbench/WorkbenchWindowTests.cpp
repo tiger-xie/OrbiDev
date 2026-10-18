@@ -1,5 +1,6 @@
 #include "SshSession.h"
 #include "WorkbenchWindow.h"
+#include "terminal/TerminalView.h"
 #include <QDir>
 #include <QFile>
 #include <QLabel>
@@ -9,6 +10,7 @@
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QUuid>
 #include <QtTest>
 
 class WorkbenchWindowTests final : public QObject
@@ -27,6 +29,133 @@ private:
     }
 
 private slots:
+    void repeatedOpenAndExplicitNewUseDifferentSemantics()
+    {
+        QTemporaryDir directory;
+        const auto profilePath = directory.filePath(QStringLiteral("profile.json"));
+        sshsetup::ConnectionProfile profile;
+        profile.host = QStringLiteral("test.invalid");
+        QString error;
+        QVERIFY(sshsetup::saveProfile(profilePath, profile, error));
+        sshworkbench::WorkbenchWindow window(profilePath,
+                                             directory.filePath(QStringLiteral("projects.json")));
+        window.m_configuration.projects = {
+            {QStringLiteral("项目"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)}};
+        window.renderProjects();
+        auto *list = window.m_projects;
+        auto *tabs = window.m_tabs;
+        auto doubleClick = [&]
+        {
+            QVERIFY(QMetaObject::invokeMethod(list, "itemDoubleClicked",
+                                              Q_ARG(QListWidgetItem *, list->item(0))));
+            // 本测试仅验证界面路由和准备中去重，阻止终端就绪后访问网络。
+            for (auto *terminal : window.findChildren<rad::client::TerminalView *>())
+                QObject::disconnect(terminal, nullptr, terminal->parent(), nullptr);
+        };
+        doubleClick();
+        QCOMPARE(tabs->count(), 1);
+        auto *first = tabs->widget(0);
+        for (int i = 0; i < 5; ++i)
+            doubleClick();
+        window.m_openSelected->click();
+        window.m_openSelected->click();
+        QCOMPARE(tabs->count(), 1);
+        window.m_newTerminal->click();
+        QCOMPARE(tabs->count(), 2);
+        doubleClick();
+        QCOMPARE(tabs->currentIndex(), 1);
+        tabs->setCurrentWidget(first);
+        doubleClick();
+        QCOMPARE(tabs->currentWidget(), first);
+        QCOMPARE(tabs->count(), 2);
+        first->setProperty("sessionClosing", true);
+        doubleClick();
+        QCOMPARE(tabs->currentIndex(), 1);
+        tabs->widget(1)->setProperty("sessionPending", false);
+        doubleClick();
+        QCOMPARE(tabs->count(), 3);
+        auto second = window.m_configuration.projects.front();
+        second.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        window.m_configuration.projects.append(second);
+        window.renderProjects();
+        window.m_openSelected->click();
+        window.m_openSelected->click();
+        QCOMPARE(tabs->count(), 4);
+        doubleClick();
+        window.m_closing = true;
+        doubleClick();
+        QCOMPARE(tabs->count(), 4);
+    }
+
+    void activeSessionIsReusedEvenAfterNonfatalError()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        launcher::Project project{
+            QStringLiteral("项目"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        window.openProject(project);
+        auto *page = window.m_tabs->widget(0);
+        auto *terminal = page->findChild<rad::client::TerminalView *>();
+        QObject::disconnect(terminal, nullptr, page, nullptr);
+        page->setProperty("sessionPending", false);
+        page->setProperty("sessionError", QStringLiteral("无效尺寸"));
+        auto *session = page->findChild<sshworkbench::SshSession *>();
+        sshsetup::ConnectionProfile invalid;
+        invalid.host = QStringLiteral("-invalid");
+        session->start(invalid, {});
+        QVERIFY(session->isActive());
+        window.openProject(project);
+        QCOMPARE(window.m_tabs->count(), 1);
+        QTRY_VERIFY_WITH_TIMEOUT(!session->isActive(), 5000);
+    }
+
+    void projectIdentityAndConnectionSnapshotPreventWrongReuse()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        launcher::Project project{QStringLiteral("项目"), QStringLiteral("D:/One"), true,
+                                  QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        auto open = [&](const launcher::Project &value)
+        {
+            window.openProject(value);
+            for (auto *terminal : window.findChildren<rad::client::TerminalView *>())
+                QObject::disconnect(terminal, nullptr, terminal->parent(), nullptr);
+        };
+        open(project);
+        project.name = QStringLiteral("重命名");
+        open(project);
+        QCOMPARE(window.m_tabs->count(), 1);
+        auto other = project;
+        other.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        open(other);
+        QCOMPARE(window.m_tabs->count(), 2);
+        project.directory = QStringLiteral("D:/Two");
+        open(project);
+        QCOMPARE(window.m_tabs->count(), 3);
+        window.m_profile.host = QStringLiteral("other.invalid");
+        open(project);
+        QCOMPARE(window.m_tabs->count(), 4);
+        window.m_profile.user = QStringLiteral("other");
+        open(project);
+        window.m_profile.port = 2222;
+        open(project);
+        window.m_profile.identityFile = QStringLiteral("C:/key");
+        open(project);
+        window.m_profile.hostFingerprint = QStringLiteral("changed");
+        open(project);
+        QCOMPARE(window.m_tabs->count(), 8);
+        open(project);
+        QCOMPARE(window.m_tabs->count(), 8);
+        window.m_tabs->currentWidget()->setProperty("sessionError", QStringLiteral("failed"));
+        open(project);
+        QCOMPARE(window.m_tabs->count(), 8);
+        window.m_tabs->currentWidget()->setProperty("terminalFailed", true);
+        open(project);
+        QCOMPARE(window.m_tabs->count(), 9);
+    }
+
     void sessionStartingDuringCloseConfirmationIsAwaited()
     {
         QTemporaryDir directory;
@@ -123,7 +252,7 @@ private slots:
         QVERIFY(!QFile::exists(projects));
         list->item(1)->setCheckState(Qt::Checked);
         launcher::Configuration saved;
-        QVERIFY2(launcher::loadConfiguration(projects, saved, error), qPrintable(error));
+        QVERIFY2(launcher::loadProjectConfiguration(projects, saved, error), qPrintable(error));
         QCOMPARE(saved.projects.at(0).name, configuration.projects.at(0).name);
         QCOMPARE(saved.projects.at(0).directory, configuration.projects.at(0).directory);
         QVERIFY(saved.projects.at(1).enabled);

@@ -1,6 +1,6 @@
 # Remote AI Development Manager（RADManager）完整开发计划
 
-> **当前安排（2026-10-18）**：原 Client/Agent 后续里程碑继续暂停，保留现有代码。当前在 `codex/ssh-setup-wizards` 分支开发 Qt 内嵌 SSH 工作台；后续任务以 [SSH 工作台分支开发计划](docs/SSH工作台_分支开发计划.md) 为准，下一张为 SSH-01。原里程碑顺序保留，不代表继续执行。
+> **当前安排（2026-10-18）**：原 Client/Agent 后续里程碑继续暂停，保留现有代码。当前在 `codex/ssh-setup-wizards` 分支开发 Qt 内嵌 SSH 工作台；后续任务以 [SSH 工作台分支开发计划](docs/SSH工作台_分支开发计划.md) 为准，SSH-01 已实现并完成本机回归，下一张为 SSH-02。原里程碑顺序保留，不代表继续执行。
 
 > 版本：架构规划 v1.1 ｜ 编制：2026-10-16
 > 目标读者：架构负责人、Codex 编程代理、Qt/C++ 实现工程师

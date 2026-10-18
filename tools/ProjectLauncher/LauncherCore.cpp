@@ -1,10 +1,13 @@
 #include "LauncherCore.h"
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
+#include <QUuid>
 
 namespace launcher
 {
@@ -97,7 +100,27 @@ bool validateConfiguration(const Configuration &configuration, QString &error)
     return true;
 }
 
-bool loadConfiguration(const QString &path, Configuration &configuration, QString &error)
+namespace
+{
+bool validProjectIds(const Configuration &configuration, QString &error)
+{
+    QSet<QString> identities;
+    for (const auto &project : configuration.projects)
+    {
+        const QUuid uuid(project.id);
+        if (uuid.isNull() || uuid.toString(QUuid::WithoutBraces) != project.id ||
+            identities.contains(project.id))
+        {
+            error = QStringLiteral("项目 ID 必须是非空、唯一的标准 UUID；配置未修改。");
+            return false;
+        }
+        identities.insert(project.id);
+    }
+    return true;
+}
+
+bool readConfiguration(const QString &path, Configuration &configuration, QString &error, bool workbench,
+                       QByteArray *originalBytes = nullptr, int *originalVersion = nullptr)
 {
     error.clear();
     QFile file(path);
@@ -125,7 +148,8 @@ bool loadConfiguration(const QString &path, Configuration &configuration, QStrin
                             QStringLiteral("identity_file"), QStringLiteral("terminal_path"),
                             QStringLiteral("projects")}) ||
         !object.value(QStringLiteral("version")).isDouble() ||
-        object.value(QStringLiteral("version")).toDouble() != 1 ||
+        (object.value(QStringLiteral("version")).toDouble() != 1 &&
+         (!workbench || object.value(QStringLiteral("version")).toDouble() != 2)) ||
         !object.value(QStringLiteral("ssh_host")).isString() ||
         !object.value(QStringLiteral("ssh_user")).isString() ||
         !object.value(QStringLiteral("identity_file")).isString() ||
@@ -136,6 +160,7 @@ bool loadConfiguration(const QString &path, Configuration &configuration, QStrin
         return false;
     }
     Configuration loaded;
+    const int version = object.value(QStringLiteral("version")).toInt();
     loaded.sshHost = object.value(QStringLiteral("ssh_host")).toString();
     loaded.sshUser = object.value(QStringLiteral("ssh_user")).toString();
     loaded.identityFile = object.value(QStringLiteral("identity_file")).toString();
@@ -143,36 +168,52 @@ bool loadConfiguration(const QString &path, Configuration &configuration, QStrin
     for (const auto value : object.value(QStringLiteral("projects")).toArray())
     {
         const auto entry = value.toObject();
-        if (!value.isObject() ||
-            !exactKeys(entry,
-                       {QStringLiteral("name"), QStringLiteral("directory"), QStringLiteral("enabled")}) ||
-            !entry.value(QStringLiteral("name")).isString() ||
+        QStringList keys{QStringLiteral("name"), QStringLiteral("directory"), QStringLiteral("enabled")};
+        if (version == 2)
+            keys.append(QStringLiteral("id"));
+        if (!value.isObject() || !exactKeys(entry, keys) || !entry.value(QStringLiteral("name")).isString() ||
             !entry.value(QStringLiteral("directory")).isString() ||
-            !entry.value(QStringLiteral("enabled")).isBool())
+            !entry.value(QStringLiteral("enabled")).isBool() ||
+            (version == 2 && !entry.value(QStringLiteral("id")).isString()))
         {
             error = QStringLiteral("项目配置字段无效；原文件未修改。");
             return false;
         }
         loaded.projects.append({entry.value(QStringLiteral("name")).toString(),
                                 entry.value(QStringLiteral("directory")).toString(),
-                                entry.value(QStringLiteral("enabled")).toBool()});
+                                entry.value(QStringLiteral("enabled")).toBool(),
+                                version == 2 ? entry.value(QStringLiteral("id")).toString()
+                                : workbench  ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+                                             : QString()});
     }
     if (!validateConfiguration(loaded, error))
         return false;
+    if (workbench && !validProjectIds(loaded, error))
+        return false;
+    if (originalBytes)
+        *originalBytes = bytes;
+    if (originalVersion)
+        *originalVersion = version;
     configuration = loaded;
     return true;
 }
 
-bool saveConfiguration(const QString &path, const Configuration &configuration, QString &error)
+bool writeConfiguration(const QString &path, const Configuration &configuration, QString &error,
+                        bool workbench)
 {
     if (!validateConfiguration(configuration, error))
         return false;
     QJsonArray projects;
     for (const auto &project : configuration.projects)
-        projects.append(QJsonObject{{QStringLiteral("name"), project.name},
-                                    {QStringLiteral("directory"), project.directory},
-                                    {QStringLiteral("enabled"), project.enabled}});
-    const QJsonObject object{{QStringLiteral("version"), 1},
+    {
+        QJsonObject entry{{QStringLiteral("name"), project.name},
+                          {QStringLiteral("directory"), project.directory},
+                          {QStringLiteral("enabled"), project.enabled}};
+        if (workbench)
+            entry.insert(QStringLiteral("id"), project.id);
+        projects.append(entry);
+    }
+    const QJsonObject object{{QStringLiteral("version"), workbench ? 2 : 1},
                              {QStringLiteral("ssh_host"), configuration.sshHost},
                              {QStringLiteral("ssh_user"), configuration.sshUser},
                              {QStringLiteral("identity_file"), configuration.identityFile},
@@ -186,6 +227,63 @@ bool saveConfiguration(const QString &path, const Configuration &configuration, 
         return false;
     }
     return true;
+}
+}
+
+bool loadConfiguration(const QString &path, Configuration &configuration, QString &error)
+{
+    return readConfiguration(path, configuration, error, false);
+}
+
+bool saveConfiguration(const QString &path, const Configuration &configuration, QString &error)
+{
+    return writeConfiguration(path, configuration, error, false);
+}
+
+bool loadProjectConfiguration(const QString &path, Configuration &configuration, QString &error)
+{
+    return readConfiguration(path, configuration, error, true);
+}
+
+bool saveProjectConfiguration(const QString &path, const Configuration &configuration, QString &error)
+{
+    if (!validateConfiguration(configuration, error) || !validProjectIds(configuration, error))
+        return false;
+    if (QFileInfo::exists(path))
+    {
+        Configuration previous;
+        QByteArray original;
+        int version = 0;
+        if (!readConfiguration(path, previous, error, true, &original, &version))
+            return false;
+        if (version == 1)
+        {
+            // 固定备份名不覆盖已有不同内容，避免把唯一可回退的原配置丢掉。
+            const QString backupPath = path + QStringLiteral(".v1.bak");
+            QFile backup(backupPath);
+            if (QFileInfo::exists(backupPath))
+            {
+                if (!backup.open(QIODevice::ReadOnly) || backup.size() != original.size() ||
+                    backup.readAll() != original || backup.error() != QFileDevice::NoError)
+                {
+                    error =
+                        QStringLiteral("已有迁移备份无法读取或内容不同：%1；原配置未修改。").arg(backupPath);
+                    return false;
+                }
+            }
+            else
+            {
+                if (!backup.open(QIODevice::WriteOnly | QIODevice::NewOnly) ||
+                    backup.write(original) != original.size() || !backup.flush())
+                {
+                    error =
+                        QStringLiteral("无法备份旧项目配置：%1；原配置未修改。").arg(backup.errorString());
+                    return false;
+                }
+            }
+        }
+    }
+    return writeConfiguration(path, configuration, error, true);
 }
 
 bool buildLaunchArguments(const Configuration &configuration, const Project &project, const QString &sshPath,

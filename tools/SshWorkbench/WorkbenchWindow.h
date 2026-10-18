@@ -4,6 +4,7 @@
 #include "LauncherCore.h"
 #include <QMainWindow>
 
+class WorkbenchWindowTests;
 class QLabel;
 class QListWidget;
 class QPushButton;
@@ -24,6 +25,7 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
+    friend class ::WorkbenchWindowTests;
     void buildUi();
     void loadProjects(const QString &legacyPath);
     bool reloadProfile();
@@ -32,8 +34,8 @@ private:
     void removeProject();
     bool saveProjects(const launcher::Configuration &configuration);
     void openSelected();
-    void openCurrent();
-    void openProject(const launcher::Project &project);
+    void openCurrent(bool createNew = false);
+    void openProject(const launcher::Project &project, bool createNew = false);
     void closeTerminal(int index);
     void finishTerminalClose(QWidget *page);
     void openSetup();
@@ -44,9 +46,11 @@ private:
     QString m_projectsPath;
     launcher::Configuration m_configuration;
     sshsetup::ConnectionProfile m_profile;
+    quint64 m_activationSerial = 0;
     bool m_preview = false;
     bool m_closing = false;
     bool m_projectsReadable = true;
+    bool m_projectsPersisted = false;
     bool m_profileReady = false;
     bool m_renderingProjects = false;
     QLabel *m_host = nullptr;
