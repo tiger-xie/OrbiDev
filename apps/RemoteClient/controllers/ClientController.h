@@ -36,7 +36,7 @@ public:
     void terminateSession(const QString &id);
 signals:
     void changed();
-    void outputReady(const QString &id, const QByteArray &bytes);
+    void outputReady(const QString &id, const QByteArray &bytes, int historyBytes);
     void sessionOpened(const QString &id);
     void sessionCreated(const QString &id);
     void sessionDetached(const QString &id);
@@ -51,6 +51,7 @@ private:
     bool m_busy = false;
     quint64 m_generation = 0;
     QHash<QString, QByteArray> m_pendingOutput;
+    QHash<QString, int> m_pendingHistoryBytes;
     QSet<QString> m_readyTerminals;
     QSet<QString> m_resizePending;
     QHash<QString, QSize> m_latestSizes;

@@ -43,7 +43,35 @@ private slots:
     void gatesInputAndResizes();
     void clipboardAndNavigation();
     void rejectsOutputOverflow();
+    void replayDoesNotAnswerHistoricalQueries();
 };
+
+void TerminalViewTests::replayDoesNotAnswerHistoricalQueries()
+{
+    TerminalView view;
+    QSignalSpy ready(&view, &TerminalView::ready);
+    QSignalSpy inputs(&view, &TerminalView::inputReady);
+    QSignalSpy failed(&view, &TerminalView::failed);
+    view.resize(800, 480);
+    view.show();
+    QVERIFY(ready.wait(20000));
+    view.setInputEnabled(true);
+    // 同一输出块跨越历史边界：历史 DA/DSR/颜色查询无回复，实时 DA 仍需正常回答。
+    const QByteArray history("\x1b[c\x1b[6n\x1b]10;?\x07history");
+    view.appendOutput(history + "\x1b[c live", history.size());
+    QTRY_VERIFY_WITH_TIMEOUT(
+        evaluate(view, QStringLiteral("clientTerminal.term.buffer.active.getLine(0).translateToString(true)"))
+            .toString()
+            .contains(QStringLiteral("history live")),
+        5000);
+    QTRY_COMPARE(inputs.count(), 1);
+    QCOMPARE(inputs.front().at(0).toByteArray(), QByteArray("\x1b[?1;2c"));
+    QTRY_VERIFY(!evaluate(view, QStringLiteral("clientTerminal.term.options.disableStdin")).toBool());
+    evaluate(view, QStringLiteral("clientTerminal.term.paste('after-history')"));
+    QTRY_COMPARE(inputs.count(), 2);
+    QCOMPARE(inputs.last().at(0).toByteArray(), QByteArray("after-history"));
+    QCOMPARE(failed.count(), 0);
+}
 
 void TerminalViewTests::rendersRawUtf8AndAnsi()
 {

@@ -60,6 +60,8 @@ cmake --build --preset debug
 
 断线自动 detach，重连需重新提供凭据、hello、list、attach。新附加从现有历史重新输出，终端应清空后重建画面；M3-02 不实现精确 ACK 重放。输入 sequence 每次新附加从 0 开始，每成功接收一帧加 1；重复序号拒绝。输出 sequence 为会话字节流的绝对偏移；历史截断发送 terminal.overrun。
 
+M5-01 补充：`session.attached.payload.replay_end_sequence` 是附加响应时 SessionManager 已收集输出的尾偏移，采用 uint64 十进制字符串，包含丢弃量。Client 用它区分历史与实时，历史查询回复不能回传活进程；Client/Agent 必须配套升级。详见 [断线恢复](M5-01_断线恢复.md)。
+
 WebSocket 地址路径固定为 `/`，不能带 query/fragment 或 Origin。`last_ack_sequence` 虽已在 M3-01 定义字段格式，本阶段路由明确拒绝，避免把有限历史回放伪装成精确恢复。重复 attach 不重置输入序号，只有真正 detach 后的新订阅才重置。
 
 ## 资源与故障语义

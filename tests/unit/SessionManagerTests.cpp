@@ -1,5 +1,6 @@
 #include <QPointer>
 #include <QtTest>
+#include <limits>
 #include <memory>
 #include <provider/IProviderAdapter.h>
 #include <session/SessionManager.h>
@@ -129,6 +130,7 @@ private slots:
     void lifecycleAndCapacity();
     void writerAndDetach();
     void independentHistory();
+    void outputSequenceDoesNotWrap();
     void leaseExpiry();
     void limits();
     void reentrantNotification();
@@ -250,9 +252,11 @@ void SessionManagerTests::independentHistory()
     const auto id = created.value();
     QVERIFY(manager.attach(id, "alice", AttachMode::ReadOnly).isSuccess());
     QVERIFY(manager.attach(id, "bob", AttachMode::ReadOnly).isSuccess());
+    QCOMPARE(manager.get(id, "alice").value().outputSequence, quint64(0));
     QSignalSpy pending(&manager, &ISessionManager::outputAvailable);
     fixture.backends[0]->produce("123456");
     QTRY_VERIFY(pending.count() >= 2);
+    QCOMPARE(manager.get(id, "alice").value().outputSequence, quint64(6));
     auto first = manager.takeOutput(id, "alice", 3);
     QVERIFY(first.isSuccess());
     QCOMPARE(first.value().bytes, QByteArray("123"));
@@ -266,6 +270,7 @@ void SessionManagerTests::independentHistory()
     QCOMPARE(alice.value().droppedBytes, quint64(1));
     QCOMPARE(bob.value().bytes, alice.value().bytes);
     QCOMPARE(bob.value().droppedBytes, quint64(4));
+    QCOMPARE(manager.get(id, "alice").value().outputSequence, quint64(12));
     QVERIFY(!manager.takeOutput(id, "carol", 10).isSuccess());
     QVERIFY(!manager.takeOutput(id, "alice", 0).isSuccess());
     QSignalSpy notification(&manager, &ISessionManager::outputAvailable);
@@ -282,6 +287,29 @@ void SessionManagerTests::independentHistory()
     const auto lost = manager.takeOutput(id, "alice", 100);
     QVERIFY(lost.isSuccess());
     QCOMPARE(lost.value().droppedBytes, quint64(5));
+    QCOMPARE(manager.get(id, "alice").value().outputSequence, quint64(17));
+    fixture.backends[0]->produce("tail");
+    QTRY_COMPARE(manager.get(id, "alice").value().outputSequence, quint64(21));
+    QVERIFY(manager.detach(id, "alice").isSuccess());
+    QVERIFY(manager.attach(id, "alice", AttachMode::ReadOnly).isSuccess());
+    QCOMPARE(manager.get(id, "alice").value().outputSequence, quint64(21));
+}
+void SessionManagerTests::outputSequenceDoesNotWrap()
+{
+    Fixture fixture;
+    SessionManager manager(fixture.options(), fixture.factory());
+    const auto created = manager.create(request(), "alice");
+    QVERIFY(created.isSuccess());
+    const auto id = created.value();
+    QSignalSpy failed(&manager, &ISessionManager::failed);
+    fixture.backends[0]->produce({}, std::numeric_limits<quint64>::max());
+    QTRY_COMPARE(manager.get(id, "alice").value().outputSequence, std::numeric_limits<quint64>::max());
+    fixture.backends[0]->produce("x");
+    QTRY_COMPARE(failed.count(), 1);
+    QCOMPARE(manager.get(id, "alice").value().outputSequence, std::numeric_limits<quint64>::max());
+    fixture.backends[0]->produce({}, 1);
+    QTRY_COMPARE(failed.count(), 2);
+    QCOMPARE(manager.get(id, "alice").value().outputSequence, std::numeric_limits<quint64>::max());
 }
 void SessionManagerTests::leaseExpiry()
 {

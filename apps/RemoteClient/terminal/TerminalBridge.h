@@ -42,7 +42,7 @@ public:
     }
 
 signals:
-    void output(QString base64);
+    void output(QString base64, bool history);
     void inputState(bool enabled);
     void pageLoaded();
     void textInput(QString text);

@@ -274,7 +274,8 @@ void ClientWindow::showSession(const QString &id)
     {
         if (m_tabs->widget(index)->property("sessionId").toString() == id)
         {
-            if (!m_controller->isSimulation() && !m_controller->terminalIsReady(id))
+            if (!m_controller->isSimulation() && (m_tabs->widget(index)->property("needsReplay").toBool() ||
+                                                  !m_controller->terminalIsReady(id)))
             {
                 removeSession(id);
                 break;
@@ -320,26 +321,48 @@ void ClientWindow::showSession(const QString &id)
             inputHint->setTextFormat(Qt::PlainText);
             inputHint->setMargin(8);
             layout->addWidget(inputHint);
+            auto *historyNotice = new QLabel(page);
+            historyNotice->setObjectName(QStringLiteral("terminalHistoryNotice"));
+            historyNotice->setWordWrap(true);
+            historyNotice->setTextFormat(Qt::PlainText);
+            historyNotice->setMargin(8);
+            layout->addWidget(historyNotice);
             auto *terminal = new TerminalView(page);
             layout->addWidget(terminal, 1);
             connect(m_controller, &ClientController::outputReady, terminal,
-                    [terminal, id](const QString &sourceId, const QByteArray &bytes)
+                    [terminal, page, id](const QString &sourceId, const QByteArray &bytes, int historyBytes)
                     {
-                        if (sourceId == id)
-                            terminal->appendOutput(bytes);
+                        if (sourceId == id && !page->property("needsReplay").toBool())
+                            terminal->appendOutput(bytes, historyBytes);
                     });
             connect(terminal, &TerminalView::inputReady, this,
-                    [this, id](const QByteArray &bytes) { m_controller->sendInput(id, bytes); });
-            connect(terminal, &TerminalView::terminalResized, this,
-                    [this, id](int columns, int rows) { m_controller->resizeTerminal(id, columns, rows); });
-            connect(terminal, &TerminalView::ready, this,
-                    [this, terminal, id]
+                    [this, page, id](const QByteArray &bytes)
                     {
+                        if (!page->property("needsReplay").toBool())
+                            m_controller->sendInput(id, bytes);
+                    });
+            connect(terminal, &TerminalView::terminalResized, this,
+                    [this, page, id](int columns, int rows)
+                    {
+                        if (!page->property("needsReplay").toBool())
+                            m_controller->resizeTerminal(id, columns, rows);
+                    });
+            connect(terminal, &TerminalView::ready, this,
+                    [this, terminal, page, id]
+                    {
+                        // 断线前尚未加载完的旧页面不能消费新连接的重放输出。
+                        if (page->property("needsReplay").toBool())
+                            return;
                         m_controller->terminalReady(id);
                         if (currentSessionId() == id)
                             terminal->focusTerminal();
                     });
-            connect(terminal, &TerminalView::failed, m_controller, &ClientController::terminalFailed);
+            connect(terminal, &TerminalView::failed, this,
+                    [this, page](const QString &error)
+                    {
+                        if (!page->property("needsReplay").toBool())
+                            m_controller->terminalFailed(error);
+                    });
         }
         const int index = m_tabs->addTab(page, session.name);
         auto *closeButton = new QToolButton(m_tabs->tabBar());
@@ -430,9 +453,22 @@ void ClientWindow::updateContext()
             auto *page = m_tabs->widget(index);
             if (page->property("sessionId").toString() == session.id)
             {
+                if (!connected)
+                    page->setProperty("needsReplay", true);
+                if (auto *notice = page->findChild<QLabel *>(QStringLiteral("terminalHistoryNotice")))
+                {
+                    const QString message =
+                        !connected ? tr("连接已断开，当前画面仅供查看。重新连接后，从工作区打开原会话继续；未"
+                                        "确认的输入不会重发。")
+                        : !session.attached
+                            ? tr("当前会话尚未附加，请从工作区重新打开；远程进程状态以 Agent 查询结果为准。")
+                            : session.historyNotice;
+                    notice->setText(message);
+                    notice->setVisible(!message.isEmpty());
+                }
                 if (auto *terminal = page->findChild<TerminalView *>())
-                    terminal->setInputEnabled(connected && session.attached && session.running &&
-                                              !session.readOnly);
+                    terminal->setInputEnabled(!page->property("needsReplay").toBool() && connected &&
+                                              session.attached && session.running && !session.readOnly);
                 if (auto *hint = page->findChild<QLabel *>(QStringLiteral("terminalInputHint")))
                 {
                     const bool readOnly = connected && session.attached && session.readOnly;

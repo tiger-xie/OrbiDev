@@ -17,6 +17,44 @@ class ProtocolTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void replayBoundary()
+    {
+        Error error;
+        QByteArray wire;
+        Envelope decoded;
+        Envelope message{1, "session.attached", id, id, {{"mode", "read_only"}}};
+        QVERIFY(encodeJson(message, wire, error));
+        for (const auto &value : {QStringLiteral("0"), QStringLiteral("9007199254740993"),
+                                  QStringLiteral("18446744073709551615")})
+        {
+            message.payload["replay_end_sequence"] = value;
+            QVERIFY(encodeJson(message, wire, error));
+            QVERIFY(decodeJson(wire, decoded, error));
+            QCOMPARE(decoded.payload["replay_end_sequence"].toString(), value);
+        }
+        const QList<QJsonValue> invalid = {0,
+                                           true,
+                                           QJsonValue(QJsonValue::Null),
+                                           QJsonArray{},
+                                           QStringLiteral(""),
+                                           QStringLiteral("01"),
+                                           QStringLiteral("-1"),
+                                           QStringLiteral("+1"),
+                                           QStringLiteral("1.0"),
+                                           QStringLiteral(" 1"),
+                                           QStringLiteral("18446744073709551616")};
+        for (const auto &value : invalid)
+        {
+            message.payload["replay_end_sequence"] = value;
+            QVERIFY(!encodeJson(message, wire, error));
+            const QJsonObject raw{{"version", 1},
+                                  {"type", "session.attached"},
+                                  {"request_id", id},
+                                  {"session_id", id},
+                                  {"payload", message.payload}};
+            QVERIFY(!decodeJson(QJsonDocument(raw).toJson(QJsonDocument::Compact), decoded, error));
+        }
+    }
     void jsonRoundTrip()
     {
         Error error;

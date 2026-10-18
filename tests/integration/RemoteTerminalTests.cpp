@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QInputMethodEvent>
+#include <QLabel>
 #include <QMap>
 #include <QSettings>
 #include <QTabWidget>
@@ -85,12 +86,17 @@ AgentWebSocketServer::Options serverOptions()
 struct Fixture
 {
     QTemporaryDir directory;
+    int backendCount = 0;
     SessionManager manager;
     AgentWebSocketServer server;
     Fixture()
-        : manager(
-              sessionOptions(directory.path()), [this]
-              { return std::make_unique<WinConPtyBackend>(WinConPtyBackend::Options{{directory.path()}}); }),
+        : manager(sessionOptions(directory.path()),
+                  [this]
+                  {
+                      ++backendCount;
+                      return std::make_unique<WinConPtyBackend>(
+                          WinConPtyBackend::Options{{directory.path()}});
+                  }),
           server(manager, serverOptions())
     {
     }
@@ -185,7 +191,92 @@ class RemoteTerminalTests final : public QObject
     Q_OBJECT
 private slots:
     void realWindowTerminalRoundTrip();
+    void reconnectAfterOneMinute();
 };
+
+void RemoteTerminalTests::reconnectAfterOneMinute()
+{
+    Fixture fixture;
+    QVERIFY(fixture.server.start().isSuccess());
+    const auto port = fixture.server.serverPort();
+    WebSocketAgentClient agent(fixture.clientOptions());
+    ClientController controller(&agent);
+    ClientWindow window(&controller);
+    window.show();
+    controller.connectAgent();
+    QVERIFY(waitUntil([&] { return controller.isConnected() && !controller.isBusy(); }));
+    controller.createSession(QStringLiteral("断线恢复"), QStringLiteral("workspace"));
+    QVERIFY(waitUntil([&] { return !controller.isBusy() && window.sessionTabCount() == 1; }));
+    const QString id = window.currentSessionId();
+    auto *tabs = window.findChild<QTabWidget *>(QStringLiteral("sessionTabs"));
+    QVERIFY(tabs);
+    auto *terminal = tabs->currentWidget()->findChild<TerminalView *>();
+    QVERIFY(terminal);
+    QVERIFY(waitUntil([&] { return terminalText(terminal).contains("[READY]"); }, 20000));
+    QVERIFY(typeCommand(terminal, "pause"));
+    QVERIFY(waitUntil([&] { return terminalText(terminal).contains("[PAUSED]"); }));
+
+    // 只中断网络监听与连接，管理器和真实子进程仍运行；不修改本机网卡。
+    fixture.server.stop();
+    QVERIFY(waitUntil([&] { return !controller.isConnected() && !controller.isBusy(); }));
+    QString rejectedInput;
+    QVERIFY(!agent.sendInput(id, "echo must-not-replay\r", rejectedInput));
+    QVERIFY(!rejectedInput.isEmpty());
+    QTest::qWait(60000);
+    QVERIFY(fixture.running(id));
+    QCOMPARE(fixture.backendCount, 1);
+
+    auto options = serverOptions();
+    options.port = port;
+    AgentWebSocketServer restored(fixture.manager, options);
+    QVERIFY(restored.start().isSuccess());
+    controller.connectAgent();
+    QVERIFY(waitUntil([&] { return controller.isConnected() && !controller.isBusy(); }));
+    QCOMPARE(controller.sessions().size(), 1);
+    QCOMPARE(controller.sessions().front().id, id);
+    QVERIFY(!controller.sessions().front().attached);
+    bool staleEventsDelivered = false;
+    bool stalePageRemainedInactive = false;
+    const auto staleEvents = connect(&agent, &IAgentClient::sessionsChanged, &window,
+                                     [&]
+                                     {
+                                         if (staleEventsDelivered || !agent.sessions().front().attached)
+                                             return;
+                                         // 附加响应先刷新状态，再排队替换页面，覆盖旧页面晚到事件窗口。
+                                         staleEventsDelivered = true;
+                                         terminal->inputReady("echo stale-page-input\r");
+                                         terminal->terminalResized(80, 24);
+                                         terminal->ready();
+                                         terminal->failed(QStringLiteral("旧页面延迟失败"));
+                                         stalePageRemainedInactive = !controller.terminalIsReady(id);
+                                     });
+    window.openSession(id);
+    QVERIFY(waitUntil([&] { return !controller.isBusy() && controller.sessions().front().attached; }));
+    disconnect(staleEvents);
+    QVERIFY(staleEventsDelivered && stalePageRemainedInactive);
+    QVERIFY(controller.isConnected());
+    QCOMPARE(window.sessionTabCount(), 1);
+    terminal = tabs->currentWidget()->findChild<TerminalView *>();
+    QVERIFY(terminal);
+    QVERIFY(waitUntil([&] { return terminalText(terminal).contains("[RESUMED]"); }, 20000));
+    QCOMPARE(terminalText(terminal).count("[READY]"), 1);
+    QVERIFY(!terminalText(terminal).contains("must-not-replay"));
+    auto *notice = tabs->currentWidget()->findChild<QLabel *>(QStringLiteral("terminalHistoryNotice"));
+    QVERIFY(notice);
+    QVERIFY(notice->isVisible());
+    QVERIFY(!notice->text().isEmpty());
+    QVERIFY(typeCommand(terminal, "echo after-reconnect"));
+    QVERIFY2(waitUntil([&] { return terminalText(terminal).contains("[ECHO]after-reconnect"); }),
+             qPrintable(controller.error() + QLatin1Char('\n') + terminalText(terminal)));
+    QVERIFY(!terminalText(terminal).contains("stale-page-input"));
+    QCOMPARE(fixture.backendCount, 1);
+    const QString screenshot = qEnvironmentVariable("RAD_CLIENT_SCREENSHOT");
+    if (!screenshot.isEmpty())
+        QVERIFY(window.grab().save(screenshot));
+    window.close();
+    QVERIFY(waitUntil([&] { return restored.connectionCount() == 0; }));
+    QVERIFY(fixture.running(id));
+}
 
 void RemoteTerminalTests::realWindowTerminalRoundTrip()
 {

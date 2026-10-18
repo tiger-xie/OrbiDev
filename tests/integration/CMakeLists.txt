@@ -41,7 +41,7 @@ set_tests_properties(agent.websocket PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
 
 add_executable(RADWebSocketAgentClientTests WebSocketAgentClientTests.cpp)
 rad_configure_target(RADWebSocketAgentClientTests)
-target_link_libraries(RADWebSocketAgentClientTests PRIVATE RADClientTransport RADAgentTransport RADWindowsTerminal Qt5::Test)
+target_link_libraries(RADWebSocketAgentClientTests PRIVATE RADClientTransport RADAgentTransport RADWindowsTerminal Qt5::WebSockets Qt5::Test)
 add_dependencies(RADWebSocketAgentClientTests FakeCli WinConPtyBackendTestsRuntime)
 add_test(NAME client.websocket COMMAND ${CMAKE_COMMAND} -E env
     "PATH=${RAD_QT_BIN};$ENV{PATH}" "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
@@ -56,6 +56,13 @@ add_dependencies(RADRemoteTerminalTests FakeCli WinConPtyBackendTestsRuntime)
 add_test(NAME client.remote-terminal COMMAND ${CMAKE_COMMAND} -E env
     "PATH=${RAD_QT_BIN};$ENV{PATH}" "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
     "RAD_CLIENT_SCREENSHOT=${PROJECT_BINARY_DIR}/m4-02-remote-$<CONFIG>.png"
-    $<TARGET_FILE:RADRemoteTerminalTests>
+    $<TARGET_FILE:RADRemoteTerminalTests> realWindowTerminalRoundTrip
     -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/remote-terminal.xml,junitxml")
 set_tests_properties(client.remote-terminal PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+
+add_test(NAME client.reconnect COMMAND ${CMAKE_COMMAND} -E env
+    "PATH=${RAD_QT_BIN};$ENV{PATH}" "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
+    "RAD_CLIENT_SCREENSHOT=${PROJECT_BINARY_DIR}/m5-01-reconnect-$<CONFIG>.png"
+    $<TARGET_FILE:RADRemoteTerminalTests> reconnectAfterOneMinute
+    -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/reconnect.xml,junitxml")
+set_tests_properties(client.reconnect PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)

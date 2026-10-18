@@ -1,12 +1,16 @@
 #include <QCryptographicHash>
 #include <QElapsedTimer>
+#include <QJsonArray>
 #include <QMap>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QWebSocket>
+#include <QWebSocketServer>
 #include <QtTest>
 #include <WinConPtyBackend.h>
 #include <functional>
 #include <memory>
+#include <protocol/ProtocolCodec.h>
 #include <provider/IProviderAdapter.h>
 #include <session/SessionManager.h>
 #include <transport/AgentWebSocketServer.h>
@@ -123,12 +127,24 @@ public:
         QTimer::singleShot(0, this, [this] { emit finished({0, true}); });
         return accepted();
     }
-    Result<OutputChunk> takeOutput(int) override
+    bool hasPendingOutput() const
     {
-        return Result<OutputChunk>::success({});
+        return !m_output.isEmpty();
+    }
+    void produce(const QByteArray &bytes)
+    {
+        m_output += bytes;
+        emit outputAvailable();
+    }
+    Result<OutputChunk> takeOutput(int maxBytes) override
+    {
+        const QByteArray bytes = m_output.left(maxBytes);
+        m_output.remove(0, bytes.size());
+        return Result<OutputChunk>::success({bytes, 0, !m_output.isEmpty()});
     }
 
 private:
+    QByteArray m_output;
     int m_delayMs;
     QTimer m_startTimer;
 };
@@ -172,6 +188,94 @@ struct Fixture
     }
 };
 
+// 可控对端只用于验证合法编码但违反附加顺序的网络消息。
+class ScriptedPeer final : public QObject
+{
+public:
+    QWebSocketServer server{QStringLiteral("sequence-test"), QWebSocketServer::NonSecureMode};
+    QWebSocket *socket = nullptr;
+    QString id = SessionId::create().toString();
+    QString replayEnd = QStringLiteral("0");
+    ScriptedPeer()
+    {
+        connect(&server, &QWebSocketServer::newConnection, this,
+                [this]
+                {
+                    socket = server.nextPendingConnection();
+                    socket->setParent(this);
+                    connect(socket, &QWebSocket::textMessageReceived, this,
+                            [this](const QString &text)
+                            {
+                                protocol::Envelope request;
+                                protocol::Error error;
+                                if (!protocol::decodeJson(text.toUtf8(), request, error))
+                                    return;
+                                QString type;
+                                QJsonObject payload;
+                                if (request.type == "auth.hello")
+                                {
+                                    type = "auth.welcome";
+                                    payload = {{"selected_version", kProtocolVersion}};
+                                }
+                                else if (request.type == "session.list")
+                                {
+                                    type = "session.listed";
+                                    payload = {
+                                        {"sessions", QJsonArray{QJsonObject{{"session_id", id},
+                                                                            {"name", "test"},
+                                                                            {"provider_id", "fake"},
+                                                                            {"workspace_id", "workspace"},
+                                                                            {"process_state", "running"},
+                                                                            {"attachable", true}}}}};
+                                }
+                                else if (request.type == "session.attach")
+                                {
+                                    type = "session.attached";
+                                    payload = {{"mode", "read_write"}};
+                                    if (!replayEnd.isNull())
+                                        payload.insert("replay_end_sequence", replayEnd);
+                                }
+                                else
+                                    return;
+                                send({kProtocolVersion, type, request.requestId, request.sessionId, payload});
+                            });
+                });
+    }
+    bool send(const protocol::Envelope &message)
+    {
+        QByteArray encoded;
+        protocol::Error error;
+        return protocol::encodeJson(message, encoded, error) &&
+               socket->sendTextMessage(QString::fromUtf8(encoded)) == encoded.size();
+    }
+    bool overrun(const QString &session, quint64 next = 10, quint64 dropped = 10)
+    {
+        return send(
+            {kProtocolVersion,
+             "terminal.overrun",
+             {},
+             session,
+             {{"next_sequence", QString::number(next)}, {"dropped_bytes", QString::number(dropped)}}});
+    }
+    bool output(quint64 sequence)
+    {
+        QByteArray encoded;
+        protocol::Error error;
+        return protocol::encodeBinary(
+                   {kProtocolVersion, protocol::TerminalKind::Output, id, sequence, "tail"}, encoded,
+                   error) &&
+               socket->sendBinaryMessage(encoded) == encoded.size();
+    }
+    WebSocketAgentClient::Options options() const
+    {
+        WebSocketAgentClient::Options result;
+        result.url = QUrl(QStringLiteral("ws://127.0.0.1:%1").arg(server.serverPort()));
+        result.token = testToken('a');
+        result.workspaces = QStringList{QStringLiteral("workspace")};
+        return result;
+    }
+};
+
 class OutputCapture final : public QObject
 {
 public:
@@ -207,6 +311,11 @@ class WebSocketAgentClientTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void replayBoundaryMarksOnlyHistory();
+    void missingReplayBoundaryRejectsAttach();
+    void retainedTailRemainsWritable();
+    void invalidOverrun_data();
+    void invalidOverrun();
     void endpointValidationAndAuthentication();
     void immediateAttachWaitsForWritableProcess();
     void creatingAttachTimesOutWithoutReadOnlyFallback();
@@ -219,6 +328,138 @@ private slots:
     void writerConflictAndWorkspaceAuthorization();
     void serverStopClearsAttachmentState();
 };
+
+void WebSocketAgentClientTests::replayBoundaryMarksOnlyHistory()
+{
+    ScriptedPeer peer;
+    peer.replayEnd = QStringLiteral("6");
+    QVERIFY(peer.server.listen(QHostAddress::LocalHost, 0));
+    WebSocketAgentClient client(peer.options());
+    QSignalSpy output(&client, &IAgentClient::outputReceived);
+    QVERIFY(connectClient(client));
+    QVERIFY(attachSession(client, peer.id));
+    QVERIFY(peer.output(0));
+    QVERIFY(peer.output(4));
+    QVERIFY(peer.output(8));
+    QVERIFY(waitUntil([&] { return output.count() == 3; }));
+    QCOMPARE(output.at(0).at(2).toInt(), 4);
+    QCOMPARE(output.at(1).at(2).toInt(), 2);
+    QCOMPARE(output.at(2).at(2).toInt(), 0);
+    QVERIFY(client.isConnected());
+}
+
+void WebSocketAgentClientTests::missingReplayBoundaryRejectsAttach()
+{
+    ScriptedPeer peer;
+    peer.replayEnd = QString();
+    QVERIFY(peer.server.listen(QHostAddress::LocalHost, 0));
+    WebSocketAgentClient client(peer.options());
+    QVERIFY(connectClient(client));
+    const auto result =
+        complete([&](IAgentClient::Completion done) { client.attachSession(peer.id, std::move(done)); });
+    QVERIFY(result.completed);
+    QVERIFY(result.error.contains(QStringLiteral("升级 Agent")));
+    QVERIFY(!client.isConnected());
+    QVERIFY(!client.sessions().first().attached);
+}
+
+void WebSocketAgentClientTests::retainedTailRemainsWritable()
+{
+    DelayedBackend *backend = nullptr;
+    Fixture fixture(
+        [&]
+        {
+            auto instance = std::make_unique<DelayedBackend>(0);
+            backend = instance.get();
+            return instance;
+        });
+    QVERIFY(fixture.server.start().isSuccess());
+    WebSocketAgentClient client(fixture.clientOptions());
+    OutputCapture capture(client);
+    QVERIFY(connectClient(client));
+    const QString id = createSession(client);
+    QVERIFY(attachSession(client, id));
+    client.disconnectAgent();
+    QVERIFY(waitUntil([&] { return fixture.server.connectionCount() == 0; }));
+    backend->produce(QByteArray(1024 * 1024 + 100, 'x') + "retained-tail");
+    QVERIFY(waitUntil([&] { return !backend->hasPendingOutput(); }));
+    QVERIFY(connectClient(client));
+    QCOMPARE(client.sessions().size(), 1);
+    QCOMPARE(client.sessions().first().id, id);
+    QVERIFY(attachSession(client, id));
+    QVERIFY(waitUntil([&] { return capture.output[id].endsWith("retained-tail"); }));
+    QVERIFY(client.isConnected());
+    QVERIFY(client.sessions().first().historyNotice.contains(QStringLiteral("不可恢复")));
+    const QString notice = client.sessions().first().historyNotice;
+    const auto listed =
+        complete([&](IAgentClient::Completion done) { client.listSessions(std::move(done)); });
+    QVERIFY(listed.completed && listed.error.isEmpty());
+    QCOMPARE(client.sessions().first().historyNotice, notice);
+    QString error;
+    QVERIFY(client.sendInput(id, "after-reconnect", error));
+    QVERIFY(waitUntil([&] { return backend->input == "after-reconnect"; }));
+}
+
+void WebSocketAgentClientTests::invalidOverrun_data()
+{
+    QTest::addColumn<QString>("scenario");
+    for (const QString &name :
+         {QStringLiteral("unattached"), QStringLiteral("other-session"), QStringLiteral("duplicate"),
+          QStringLiteral("after-output"), QStringLiteral("offset"), QStringLiteral("first-gap"),
+          QStringLiteral("later-gap"), QStringLiteral("unannounced-gap")})
+        QTest::newRow(qPrintable(name)) << name;
+}
+
+void WebSocketAgentClientTests::invalidOverrun()
+{
+    QFETCH(QString, scenario);
+    ScriptedPeer peer;
+    QVERIFY(peer.server.listen(QHostAddress::LocalHost, 0));
+    WebSocketAgentClient client(peer.options());
+    OutputCapture capture(client);
+    QVERIFY(connectClient(client));
+    if (scenario != "unattached")
+        QVERIFY(attachSession(client, peer.id));
+    if (scenario == "unannounced-gap")
+        QVERIFY(peer.output(10));
+    else if (scenario == "other-session")
+        QVERIFY(peer.overrun(SessionId::create().toString()));
+    else if (scenario == "offset")
+        QVERIFY(peer.overrun(peer.id, 10, 9));
+    else if (scenario == "after-output")
+    {
+        QVERIFY(peer.output(0));
+        QVERIFY(waitUntil([&] { return capture.output[peer.id] == "tail"; }));
+        QVERIFY(peer.overrun(peer.id, 14));
+    }
+    else
+    {
+        QVERIFY(peer.overrun(peer.id));
+        if (scenario != "unattached")
+        {
+            QVERIFY(waitUntil(
+                [&]
+                {
+                    return !client.isConnected() ||
+                           client.sessions().first().historyNotice.contains(QStringLiteral("不可恢复"));
+                }));
+            QVERIFY(client.isConnected());
+            if (scenario == "duplicate")
+                QVERIFY(peer.overrun(peer.id, 20));
+            else if (scenario == "first-gap")
+                QVERIFY(peer.output(11));
+            else
+            {
+                QVERIFY(peer.output(10));
+                QVERIFY(waitUntil([&] { return capture.output[peer.id] == "tail"; }));
+                QVERIFY(peer.output(15));
+            }
+        }
+    }
+    QVERIFY(waitUntil([&] { return !client.isConnected(); }));
+    QString error;
+    QVERIFY(!client.sendInput(peer.id, "must-not-send", error));
+}
 
 void WebSocketAgentClientTests::endpointValidationAndAuthentication()
 {

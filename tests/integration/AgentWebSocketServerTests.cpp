@@ -202,6 +202,7 @@ private slots:
     void authentication();
     void negotiationAndTimeout();
     void terminalRoundTrip();
+    void attachReplayBoundary();
     void reconnectPreservesProcess();
     void authorizationAndIsolation();
     void replayAndOversizedMessages();
@@ -210,6 +211,45 @@ private slots:
     void pingTimeout();
     void oversizedSessionList();
 };
+void AgentWebSocketServerTests::attachReplayBoundary()
+{
+    QTemporaryDir directory;
+    auto options = sessionOptions(directory.path());
+    options.outputCapacityBytes = 8;
+    test::MockTerminal *backend = nullptr;
+    SessionManager manager(options,
+                           [&]
+                           {
+                               auto result = std::make_unique<test::MockTerminal>();
+                               backend = result.get();
+                               return result;
+                           });
+    AgentWebSocketServer server(manager, serverOptions());
+    QVERIFY(server.start().isSuccess());
+    Peer peer;
+    QVERIFY(peer.open(server.serverPort()));
+    QVERIFY(peer.hello());
+    const QString id = peer.create();
+    const auto parsed = SessionId::parse(id).value();
+    QVERIFY(waitUntil([&] { return manager.get(parsed, "alice").value().status == SessionStatus::Running; }));
+    auto attached = peer.response(peer.send("session.attach", id, {{"mode", "read_write"}}));
+    QCOMPARE(attached.type, QString("session.attached"));
+    QCOMPARE(attached.payload["replay_end_sequence"].toString(), QString("0"));
+    QCOMPARE(peer.response(peer.send("session.detach", id)).type, QString("session.detached"));
+    // 同时超过后端和管理器的缓存容量，边界必须包含两层丢弃量。
+    backend->produce("0123456789abcdefghijklmn");
+    QVERIFY(waitUntil([&] { return manager.get(parsed, "alice").value().outputSequence == 24; }));
+    attached = peer.response(peer.send("session.attach", id, {{"mode", "read_write"}}));
+    QCOMPARE(attached.type, QString("session.attached"));
+    QCOMPARE(attached.payload["replay_end_sequence"].toString(), QString("24"));
+    QVERIFY(waitUntil([&] { return peer.output[id] == "ghijklmn"; }));
+    QVERIFY(!peer.frames.isEmpty());
+    QCOMPARE(peer.frames.front().sequence, quint64(16));
+    backend->produce("live");
+    QVERIFY(waitUntil([&] { return peer.output[id] == "ghijklmnlive"; }));
+    QCOMPARE(peer.frames.back().sequence, quint64(24));
+    QCOMPARE(attached.payload["replay_end_sequence"].toString(), QString("24"));
+}
 void AgentWebSocketServerTests::authentication()
 {
     Fixture fixture;

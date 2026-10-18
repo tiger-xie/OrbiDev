@@ -164,8 +164,9 @@ struct SessionSnapshot
     QString workspaceId;
     SessionStatus status = SessionStatus::Creating;
     int subscriberCount = 0;
-    QString creatorClientId; // 用于启动完成前取消，仍须通过授权校验。
-    QString writerClientId;  // 空表示无写者；进程状态不随附加/分离改变。
+    QString creatorClientId;    // 用于启动完成前取消，仍须通过授权校验。
+    QString writerClientId;     // 空表示无写者；进程状态不随附加/分离改变。
+    quint64 outputSequence = 0; // 累计原始输出末尾偏移，包含已丢弃字节，用于附加时确定回放边界。
 };
 
 struct ExitStatus

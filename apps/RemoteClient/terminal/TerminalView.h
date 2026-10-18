@@ -20,7 +20,8 @@ class TerminalView final : public QWidget
 public:
     explicit TerminalView(QWidget *parent = nullptr);
     ~TerminalView() override;
-    void appendOutput(const QByteArray &bytes);
+    // historyBytes 表示此块的历史前缀，历史写入期间禁止回传查询回复或用户输入。
+    void appendOutput(const QByteArray &bytes, int historyBytes = 0);
     void setInputEnabled(bool enabled);
     void focusTerminal();
     void zoomBy(int delta);
@@ -43,6 +44,8 @@ private:
     QTimer *m_timeout = nullptr;
     QByteArray m_pending;
     int m_inFlight = 0;
+    int m_pendingHistoryBytes = 0;
+    bool m_replayingBatch = false;
     int m_columns = 80;
     int m_rows = 24;
     bool m_ready = false;

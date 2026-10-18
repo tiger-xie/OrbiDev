@@ -74,3 +74,9 @@ RADClientUi 位于 apps/RemoteClient，包含 ClientWindow、ClientController、
 RADClientTransport 位于 core/transport，实现 QtCore 的 IAgentClient 契约，依赖现有 RADProtocol、Qt Network/WebSockets。RADTerminalView 属于 apps/RemoteClient，以离线 QRC、WebChannel 和 xterm 处理字节与显示。ClientWindow 不启动 Provider 或 ConPTY；ClientController 处理页面加载前缓冲及尺寸请求合并。
 
 输入权限来自附加状态和写者身份；窗口关闭只断开连接。输出序号缺口、缓冲超限或渲染失败明确报错，均不终止远端进程。凭据仅在内存中，连接地址仅允许回环或 Tailscale IPv4。源码、启动与验证边界见 [M4-02 说明](M4-02_远程终端集成.md) 和 [ADR-019](ADR/019_Client远程终端.md)。
+
+## M5-01 有限历史恢复
+
+显式重连重新查询原 SessionId，用户重新附加后创建新终端视图，重放 Agent 当前保留的原始输出；旧页面的输入、输出、尺寸、就绪和失败回调不得影响新连接。首次输出前允许一次合法截断声明，后续严格验证字节偏移；持续输出中的缺口仍断开并要求重新附加。
+
+ClientSession.historyNotice 提供独立且持续的历史限制提示。附加响应新增 replay_end_sequence，按累计输出偏移标记历史前缀并贯穿网络、Controller 和 TerminalView；历史写入期间禁止输入及自动回复，实时输出仍正常响应。两端必须配套更新。复用 SessionManager 默认每会话 1 MiB 有限缓存，不提供精确终端快照，不自动重试输入。范围和验证见 [M5-01 说明](M5-01_断线恢复.md) 与 [ADR-020](ADR/020_有限历史断线恢复.md)。

@@ -12,6 +12,11 @@
   term.parser.registerOscHandler(52, function () { return true; });
   term.parser.registerOscHandler(8, function () { return true; });
   let enabled = false;
+  let replaying = false;
+  function updateInputState() {
+    term.options.disableStdin = !enabled || replaying;
+    term.options.cursorBlink = enabled && !replaying;
+  }
   let bridge = null;
   const api = window.clientTerminal = {
     term: term,
@@ -33,7 +38,7 @@
       event.preventDefault();
       if (event.type === 'keydown' && bridge) {
         if (key === 'c') bridge.copy();
-        else if (enabled) bridge.paste();
+        else if (enabled && !replaying) bridge.paste();
       }
       return false;
     }
@@ -41,20 +46,26 @@
   });
   new QWebChannel(qt.webChannelTransport, function (channel) {
     bridge = channel.objects.bridge;
-    term.onData(function (text) { if (enabled) bridge.input(text); });
-    term.onBinary(function (text) { if (enabled) bridge.binaryInput(btoa(text)); });
+    term.onData(function (text) { if (enabled && !replaying) bridge.input(text); });
+    term.onBinary(function (text) { if (enabled && !replaying) bridge.binaryInput(btoa(text)); });
     term.onResize(function (size) { bridge.resized(size.cols, size.rows); });
     bridge.inputState.connect(function (value) {
       enabled = value;
-      term.options.disableStdin = !value;
-      term.options.cursorBlink = value;
+      updateInputState();
     });
-    bridge.output.connect(function (base64) {
+    bridge.output.connect(function (base64, history) {
       const raw = atob(base64);
       const bytes = new Uint8Array(raw.length);
       for (let index = 0; index < raw.length; ++index) bytes[index] = raw.charCodeAt(index);
       // Uint8Array 保留 xterm 的流式 UTF-8 解码状态，拆分中文不会先被 QString 替换。
-      term.write(bytes, function () { bridge.acknowledged(); });
+      // 历史查询的自动回复不能再次送入活进程；回放写入期间暂时禁止输入。
+      replaying = history;
+      updateInputState();
+      term.write(bytes, function () {
+        replaying = false;
+        updateInputState();
+        bridge.acknowledged();
+      });
     });
     fit.fit();
     bridge.resized(term.cols, term.rows);

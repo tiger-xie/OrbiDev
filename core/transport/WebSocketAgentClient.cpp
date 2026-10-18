@@ -56,7 +56,9 @@ public:
     {
         quint64 input = 0;
         quint64 output = 0;
+        quint64 replayEnd = 0;
         bool hasOutput = false;
+        bool historyTruncated = false;
     };
     State(WebSocketAgentClient &owner, Options options) : m_owner(owner), m_options(std::move(options))
     {
@@ -211,7 +213,23 @@ public:
         }
         if (message.type == "terminal.overrun")
         {
-            fail(QStringLiteral("终端输出已溢出，无法保证连续性；请重新附加"));
+            auto attachment = m_attachments.find(message.sessionId);
+            auto *session = find(message.sessionId);
+            const auto next = message.payload["next_sequence"].toString().toULongLong();
+            const auto dropped = message.payload["dropped_bytes"].toString().toULongLong();
+            // 当前附加总是从零开始；首包前可接受一次明确的历史截断，后续不得跳过缺口。
+            if (!m_ready || !session || attachment == m_attachments.end() || attachment->hasOutput ||
+                attachment->historyTruncated || next == 0 || next != dropped ||
+                next == std::numeric_limits<quint64>::max())
+            {
+                fail(QStringLiteral("终端输出溢出通知与当前附加不匹配，无法保证连续性；请重新附加"));
+                return;
+            }
+            attachment->historyTruncated = true;
+            attachment->output = next;
+            session->historyNotice = QStringLiteral("历史输出已截断，之前内容不可恢复；当前仅重放保留的原始输"
+                                                    "出，不能精确恢复终端画面。回放写入期间暂不可输入");
+            emit m_owner.sessionsChanged();
             return;
         }
         if (message.type == "session.status")
@@ -259,19 +277,20 @@ public:
             return;
         }
         auto &attachment = m_attachments[frame.sessionId];
-        if ((attachment.hasOutput && frame.sequence != attachment.output) ||
+        if (frame.sequence != attachment.output ||
             frame.sequence > std::numeric_limits<quint64>::max() - static_cast<quint64>(frame.bytes.size()))
         {
             fail(QStringLiteral("终端输出序号不连续，连接已断开"));
             return;
         }
-        const bool partial = !attachment.hasOutput && frame.sequence != 0;
+        const int historyBytes = frame.sequence < attachment.replayEnd
+                                     ? static_cast<int>(qMin(attachment.replayEnd - frame.sequence,
+                                                             static_cast<quint64>(frame.bytes.size())))
+                                     : 0;
         attachment.hasOutput = true;
         attachment.output = frame.sequence + static_cast<quint64>(frame.bytes.size());
-        if (partial)
-            emit m_owner.errorOccurred(QStringLiteral("本次附加仅包含部分历史输出，之前内容不可恢复"));
         if (m_ready)
-            emit m_owner.outputReceived(frame.sessionId, frame.bytes);
+            emit m_owner.outputReceived(frame.sessionId, frame.bytes, historyBytes);
     }
     void list(Completion completion)
     {
@@ -357,49 +376,67 @@ public:
     void attach(const QString &id, bool readOnly, Completion completion)
     {
         const auto generation = m_generation;
-        request("session.attach", "session.attached", id, {{"mode", readOnly ? "read_only" : "read_write"}},
-                [this, id, readOnly, generation, completion = std::move(completion)](
-                    const wire::Envelope &message, const QString &error) mutable
+        request(
+            "session.attach", "session.attached", id, {{"mode", readOnly ? "read_only" : "read_write"}},
+            [this, id, readOnly, generation,
+             completion = std::move(completion)](const wire::Envelope &message, const QString &error) mutable
+            {
+                if (generation != m_generation)
                 {
-                    if (generation != m_generation)
-                    {
-                        finish(std::move(completion), unavailable(), id);
-                        return;
-                    }
-                    if (!readOnly && (error == "busy" || error == "forbidden"))
-                    {
-                        attach(id, true, std::move(completion));
-                        return;
-                    }
-                    if (!error.isEmpty())
-                    {
-                        finish(std::move(completion), rejected(error), id);
-                        return;
-                    }
-                    auto *session = find(id);
-                    if (!session)
-                    {
-                        fail(QStringLiteral("附加响应的会话已不在列表中"));
-                        finish(std::move(completion), unavailable(), id);
-                        return;
-                    }
-                    if (message.payload["mode"].toString() != (readOnly ? "read_only" : "read_write"))
-                    {
-                        finish(std::move(completion), QStringLiteral("服务器附加模式与请求不匹配"), id);
-                        fail(QStringLiteral("服务器附加模式与请求不匹配"));
-                        return;
-                    }
-                    session->attached = true;
-                    session->readOnly = message.payload["mode"] == QJsonValue("read_only");
-                    session->writerAvailable = !session->readOnly;
-                    if (!m_attachments.contains(id))
-                        m_attachments.insert(id, {});
-                    const bool attachedReadOnly = session->readOnly;
-                    finish(std::move(completion), {}, id);
-                    emit m_owner.sessionsChanged();
-                    if (attachedReadOnly)
-                        emit m_owner.errorOccurred(QStringLiteral("会话已以只读方式附加，未获得输入控制权"));
-                });
+                    finish(std::move(completion), unavailable(), id);
+                    return;
+                }
+                if (!readOnly && (error == "busy" || error == "forbidden"))
+                {
+                    attach(id, true, std::move(completion));
+                    return;
+                }
+                if (!error.isEmpty())
+                {
+                    finish(std::move(completion), rejected(error), id);
+                    return;
+                }
+                auto *session = find(id);
+                if (!session)
+                {
+                    fail(QStringLiteral("附加响应的会话已不在列表中"));
+                    finish(std::move(completion), unavailable(), id);
+                    return;
+                }
+                if (message.payload["mode"].toString() != (readOnly ? "read_only" : "read_write"))
+                {
+                    finish(std::move(completion), QStringLiteral("服务器附加模式与请求不匹配"), id);
+                    fail(QStringLiteral("服务器附加模式与请求不匹配"));
+                    return;
+                }
+                bool validReplayEnd = false;
+                const auto replayEnd =
+                    message.payload["replay_end_sequence"].toString().toULongLong(&validReplayEnd);
+                if (!validReplayEnd)
+                {
+                    const auto failure = QStringLiteral("Agent 未提供历史回放边界，请升级 Agent 后重新连接");
+                    finish(std::move(completion), failure, id);
+                    fail(failure);
+                    return;
+                }
+                session->attached = true;
+                session->readOnly = message.payload["mode"] == QJsonValue("read_only");
+                session->writerAvailable = !session->readOnly;
+                if (!m_attachments.contains(id))
+                {
+                    Attachment attachment;
+                    attachment.replayEnd = replayEnd;
+                    m_attachments.insert(id, attachment);
+                    session->historyNotice =
+                        QStringLiteral("本次附加重放 Agent "
+                                       "保留的有限原始输出，不保证精确恢复终端画面。回放写入期间暂不可输入");
+                }
+                const bool attachedReadOnly = session->readOnly;
+                finish(std::move(completion), {}, id);
+                emit m_owner.sessionsChanged();
+                if (attachedReadOnly)
+                    emit m_owner.errorOccurred(QStringLiteral("会话已以只读方式附加，未获得输入控制权"));
+            });
     }
     void tick()
     {

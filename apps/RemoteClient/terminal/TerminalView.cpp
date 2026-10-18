@@ -122,7 +122,7 @@ TerminalView::TerminalView(QWidget *parent) : QWidget(parent)
     connect(m_bridge, &TerminalBridge::textInput, this,
             [this](const QString &text)
             {
-                if (!m_ready || m_failed || !m_inputEnabled)
+                if (!m_ready || m_failed || !m_inputEnabled || m_replayingBatch)
                     return;
                 const QByteArray bytes = text.toUtf8();
                 if (bytes.size() > maxBatchBytes)
@@ -133,7 +133,7 @@ TerminalView::TerminalView(QWidget *parent) : QWidget(parent)
     connect(m_bridge, &TerminalBridge::rawInput, this,
             [this](const QString &base64)
             {
-                if (!m_ready || m_failed || !m_inputEnabled)
+                if (!m_ready || m_failed || !m_inputEnabled || m_replayingBatch)
                     return;
                 const QByteArray bytes = QByteArray::fromBase64(base64.toLatin1());
                 if (bytes.size() > maxBatchBytes)
@@ -157,6 +157,7 @@ TerminalView::TerminalView(QWidget *parent) : QWidget(parent)
                 if (!m_ready || m_failed || m_inFlight == 0)
                     return;
                 m_inFlight = 0;
+                m_replayingBatch = false;
                 m_timeout->stop();
                 flushOutput();
             });
@@ -173,16 +174,23 @@ TerminalView::~TerminalView()
     delete m_profile;
 }
 
-void TerminalView::appendOutput(const QByteArray &bytes)
+void TerminalView::appendOutput(const QByteArray &bytes, int historyBytes)
 {
     if (m_failed || bytes.isEmpty())
         return;
+    if (historyBytes < 0 || historyBytes > bytes.size() ||
+        (historyBytes > 0 && m_pendingHistoryBytes != m_pending.size()))
+    {
+        fail(QStringLiteral("终端历史边界无效，请重新附加会话。"));
+        return;
+    }
     if (bytes.size() > maxPendingBytes - m_pending.size() - m_inFlight)
     {
         fail(QStringLiteral("终端显示积压超过 1 MiB，输出已停止，请重新附加会话。"));
         return;
     }
     m_pending.append(bytes);
+    m_pendingHistoryBytes += historyBytes;
     flushOutput();
 }
 
@@ -190,11 +198,15 @@ void TerminalView::flushOutput()
 {
     if (!m_ready || m_failed || m_inFlight != 0 || m_pending.isEmpty())
         return;
-    const QByteArray batch = m_pending.left(maxBatchBytes);
+    m_replayingBatch = m_pendingHistoryBytes > 0;
+    const QByteArray batch =
+        m_pending.left(m_replayingBatch ? qMin(maxBatchBytes, m_pendingHistoryBytes) : maxBatchBytes);
     m_pending.remove(0, batch.size());
+    if (m_replayingBatch)
+        m_pendingHistoryBytes -= batch.size();
     m_inFlight = batch.size();
     m_timeout->start(20000);
-    emit m_bridge->output(QString::fromLatin1(batch.toBase64()));
+    emit m_bridge->output(QString::fromLatin1(batch.toBase64()), m_replayingBatch);
 }
 
 void TerminalView::setInputEnabled(bool enabled)
@@ -241,7 +253,7 @@ void TerminalView::copySelection()
 
 void TerminalView::pasteClipboard()
 {
-    if (!m_ready || m_failed || !m_inputEnabled)
+    if (!m_ready || m_failed || !m_inputEnabled || m_replayingBatch)
         return;
     const QString text = QApplication::clipboard()->text();
     if (text.toUtf8().size() > maxBatchBytes)
@@ -261,6 +273,8 @@ void TerminalView::fail(const QString &reason)
     m_failed = true;
     m_inputEnabled = false;
     m_pending.clear();
+    m_pendingHistoryBytes = 0;
+    m_replayingBatch = false;
     m_inFlight = 0;
     m_timeout->stop();
     emit m_bridge->inputState(false);

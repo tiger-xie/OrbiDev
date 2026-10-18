@@ -7,6 +7,7 @@
 #include <QThread>
 #include <QTimer>
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <provider/IProviderAdapter.h>
 #include <terminal/ITerminalBackend.h>
@@ -211,6 +212,13 @@ public:
     }
     void append(Session &session, const OutputChunk &chunk)
     {
+        if (chunk.droppedBytes > std::numeric_limits<quint64>::max() - session.end ||
+            static_cast<quint64>(chunk.bytes.size()) >
+                std::numeric_limits<quint64>::max() - session.end - chunk.droppedBytes)
+        {
+            reportError(session.snapshot.id, error(ErrorCode::SystemError, "终端输出序号超出范围"), false);
+            return;
+        }
         if (chunk.droppedBytes != 0)
         {
             // 后端缺口前的历史不能与缺口后的字节拼接，否则 VT 流会伪装为连续输出。
@@ -219,6 +227,7 @@ public:
             session.begin = session.end;
         }
         session.end += static_cast<quint64>(chunk.bytes.size());
+        session.snapshot.outputSequence = session.end;
         session.history.append(chunk.bytes);
         if (session.history.size() > m_options.outputCapacityBytes)
             session.history.remove(0, session.history.size() - m_options.outputCapacityBytes);

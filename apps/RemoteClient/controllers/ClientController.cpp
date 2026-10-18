@@ -19,10 +19,10 @@ ClientController::ClientController(IAgentClient *agent, QObject *parent) : QObje
                 emit operationFailed(error);
             });
     connect(agent, &IAgentClient::outputReceived, this,
-            [this](const QString &id, const QByteArray &bytes)
+            [this](const QString &id, const QByteArray &bytes, int historyBytes)
             {
                 if (m_readyTerminals.contains(id))
-                    emit outputReady(id, bytes);
+                    emit outputReady(id, bytes, historyBytes);
                 else
                 {
                     auto &pending = m_pendingOutput[id];
@@ -32,6 +32,7 @@ ClientController::ClientController(IAgentClient *agent, QObject *parent) : QObje
                         return;
                     }
                     pending += bytes;
+                    m_pendingHistoryBytes[id] += historyBytes;
                 }
             });
     connect(agent, &IAgentClient::disconnected, this,
@@ -40,6 +41,7 @@ ClientController::ClientController(IAgentClient *agent, QObject *parent) : QObje
                 ++m_generation;
                 m_readyTerminals.clear();
                 m_pendingOutput.clear();
+                m_pendingHistoryBytes.clear();
                 m_resizePending.clear();
                 m_latestSizes.clear();
                 m_busy = false;
@@ -112,6 +114,7 @@ IAgentClient::Completion ClientController::completion(const QString &action)
         {
             guard->m_readyTerminals.remove(id);
             guard->m_pendingOutput.remove(id);
+            guard->m_pendingHistoryBytes.remove(id);
             emit guard->sessionDetached(id);
         }
         else if (action == QStringLiteral("create"))
@@ -149,6 +152,7 @@ void ClientController::openSession(const QString &id)
             {
                 m_readyTerminals.remove(id);
                 m_pendingOutput.remove(id);
+                m_pendingHistoryBytes.remove(id);
             }
         m_agent->attachSession(id, completion(QStringLiteral("open")));
     }
@@ -179,8 +183,9 @@ void ClientController::terminalReady(const QString &id)
 {
     m_readyTerminals.insert(id);
     const auto bytes = m_pendingOutput.take(id);
+    const int historyBytes = m_pendingHistoryBytes.take(id);
     if (!bytes.isEmpty())
-        emit outputReady(id, bytes);
+        emit outputReady(id, bytes, historyBytes);
 }
 void ClientController::terminalFailed(const QString &message)
 {

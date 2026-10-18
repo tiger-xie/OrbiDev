@@ -490,7 +490,15 @@ public:
                 subscription.generation = ++client->nextSubscriptionGeneration;
                 client->subscriptions.insert(request.sessionId, subscription);
             }
-            reply("session.attached", {{"mode", payload["mode"]}});
+            const auto attached = m_manager.get(id.value(), client->id);
+            if (!attached.isSuccess())
+            {
+                rejected(attached.error());
+                return;
+            }
+            reply("session.attached",
+                  {{"mode", payload["mode"]},
+                   {"replay_end_sequence", QString::number(attached.value().outputSequence)}});
             scheduleOutput(client, request.sessionId);
             emit m_owner.auditEvent(QStringLiteral("session_attached"), client->id);
             return;

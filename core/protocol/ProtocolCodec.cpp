@@ -138,8 +138,9 @@ bool payloadValid(const Envelope &message)
         return fields(p, {"process_state", "attachable"}) && state(p["process_state"]) &&
                p["attachable"].isBool();
     if (type == "session.attached")
-        return fields(p, {"mode"}) &&
-               (p["mode"] == QJsonValue("read_only") || p["mode"] == QJsonValue("read_write"));
+        return fields(p, {"mode"}, {"replay_end_sequence"}) &&
+               (p["mode"] == QJsonValue("read_only") || p["mode"] == QJsonValue("read_write")) &&
+               (!p.contains("replay_end_sequence") || counter(p["replay_end_sequence"]));
     if (type == "session.listed")
     {
         if (!fields(p, {"sessions"}) || !p["sessions"].isArray())

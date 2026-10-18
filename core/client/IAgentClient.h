@@ -21,11 +21,14 @@ struct ClientSession
     int exitCode = 0;
     QString processState;
     bool exitCodeKnown = true;
+    // 本次附加的历史完整性提示；状态和列表刷新必须保留，由新附加重新设置。
+    QString historyNotice;
 };
 
 // 同一 Qt 事件线程调用；借用者必须先于本对象销毁。
 // 命令异步回调一次，销毁取消未完成回调。断线不终止进程，不重放输入。
-// outputReceived 为原始 VT 字节；消费者必须有界缓存，溢出显式报告并断开。
+// outputReceived 为原始 VT 字节，historyBytes 指定本块前多少字节属于附加时的历史。
+// 消费者必须有界缓存，历史回放不可回传终端自动回复，溢出显式报告并断开。
 class IAgentClient : public QObject
 {
     Q_OBJECT
@@ -52,7 +55,7 @@ public:
 signals:
     void disconnected();
     void sessionsChanged();
-    void outputReceived(const QString &sessionId, const QByteArray &bytes);
+    void outputReceived(const QString &sessionId, const QByteArray &bytes, int historyBytes = 0);
     void errorOccurred(const QString &message);
 };
 }
