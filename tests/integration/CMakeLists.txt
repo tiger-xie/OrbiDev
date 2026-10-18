@@ -66,3 +66,13 @@ add_test(NAME client.reconnect COMMAND ${CMAKE_COMMAND} -E env
     $<TARGET_FILE:RADRemoteTerminalTests> reconnectAfterOneMinute
     -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/reconnect.xml,junitxml")
 set_tests_properties(client.reconnect PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+
+add_executable(RADAgentPersistenceTests AgentPersistenceTests.cpp)
+rad_configure_target(RADAgentPersistenceTests)
+target_link_libraries(RADAgentPersistenceTests PRIVATE RADClientTransport Qt5::Network Qt5::Test)
+add_dependencies(RADAgentPersistenceTests RemoteAgent FakeCli)
+add_test(NAME agent.persistence COMMAND ${CMAKE_COMMAND} -E env
+    "PATH=${RAD_QT_BIN};$ENV{PATH}" "RAD_FAKECLI_PATH=$<TARGET_FILE:FakeCli>"
+    "RAD_AGENT_PATH=$<TARGET_FILE:RemoteAgent>"
+    $<TARGET_FILE:RADAgentPersistenceTests>)
+set_tests_properties(agent.persistence PROPERTIES TIMEOUT 90 RUN_SERIAL TRUE)

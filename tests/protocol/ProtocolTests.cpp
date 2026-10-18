@@ -17,6 +17,28 @@ class ProtocolTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void diagnosticMetadata()
+    {
+        Error error;
+        QByteArray bytes;
+        Envelope message{1, "session.status", {}, id, {{"process_state", "failed"}, {"attachable", false}}};
+        QJsonObject metadata{{"created_at_utc_ms", "1"},          {"updated_at_utc_ms", "2"},
+                             {"exit_code_valid", false},          {"exit_code", 0},
+                             {"failure_code", "agent_restarted"}, {"metadata_only", true}};
+        message.payload["diagnostics"] = metadata;
+        QVERIFY(encodeJson(message, bytes, error));
+        metadata["created_at_utc_ms"] = "9223372036854775808";
+        message.payload["diagnostics"] = metadata;
+        QVERIFY(!encodeJson(message, bytes, error));
+        metadata["created_at_utc_ms"] = "1";
+        metadata["failure_code"] = "untrusted secret";
+        message.payload["diagnostics"] = metadata;
+        QVERIFY(!encodeJson(message, bytes, error));
+        metadata["failure_code"] = "";
+        metadata["exit_code"] = 1.5;
+        message.payload["diagnostics"] = metadata;
+        QVERIFY(!encodeJson(message, bytes, error));
+    }
     void replayBoundary()
     {
         Error error;

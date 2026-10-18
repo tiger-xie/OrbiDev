@@ -1,4 +1,5 @@
 #include "WebSocketAgentClient.h"
+#include "WebSocketReadBuffer.h"
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -64,7 +65,7 @@ public:
     {
         m_clock.start();
         m_socket.setProxy(QNetworkProxy::NoProxy);
-        m_socket.setReadBufferSize(wire::kMaxFrameBytes);
+        configureWebSocketReadBuffer(m_socket);
         m_socket.setMaxAllowedIncomingFrameSize(wire::kMaxFrameBytes);
         m_socket.setMaxAllowedIncomingMessageSize(wire::kMaxFrameBytes);
         QObject::connect(&m_socket, &QWebSocket::connected, &m_owner,
@@ -200,7 +201,11 @@ public:
     {
         session.processState = payload["process_state"].toString();
         session.running = session.processState == "running";
-        session.exitCodeKnown = false;
+        const auto metadata = payload["diagnostics"].toObject();
+        session.exitCodeKnown = metadata["exit_code_valid"].toBool(false);
+        session.exitCode = metadata["exit_code"].toInt();
+        session.failureCode = metadata["failure_code"].toString();
+        session.metadataOnly = metadata["metadata_only"].toBool(false);
     }
     void receive(const QString &text)
     {
@@ -628,6 +633,12 @@ void WebSocketAgentClient::attachSession(const QString &id, Completion completio
     if (m_state->find(id)->processState == "creating")
     {
         m_state->m_waitingAttachments.insert(id, {m_state->m_clock.elapsed() + 5000, std::move(completion)});
+        return;
+    }
+    if (m_state->find(id)->metadataOnly)
+    {
+        m_state->finish(std::move(completion),
+                        QStringLiteral("历史会话仅保留状态，原进程与终端输出不可恢复；请新建会话"), id);
         return;
     }
     m_state->attach(id, false, std::move(completion));

@@ -2,13 +2,46 @@
 #include <QtTest>
 #include <limits>
 #include <memory>
+#include <persistence/ISessionRepository.h>
 #include <provider/IProviderAdapter.h>
 #include <session/SessionManager.h>
+#include <stdexcept>
 #include <terminal/ITerminalBackend.h>
 
 using namespace rad;
 namespace
 {
+class MemoryRepository final : public ISessionRepository
+{
+public:
+    QVector<SessionSnapshot> records;
+    bool rejectSave = false;
+    OperationResult open(const QString &) override
+    {
+        return accepted();
+    }
+    OperationResult recover(qint64) override
+    {
+        return accepted();
+    }
+    Result<QVector<SessionSnapshot>> load(int) override
+    {
+        return Result<QVector<SessionSnapshot>>::success(records);
+    }
+    OperationResult save(const SessionSnapshot &snapshot) override
+    {
+        if (rejectSave)
+            return OperationResult::failure({ErrorCode::SystemError, QStringLiteral("测试存储失败")});
+        for (auto &record : records)
+            if (record.id == snapshot.id)
+            {
+                record = snapshot;
+                return accepted();
+            }
+        records.append(snapshot);
+        return accepted();
+    }
+};
 class TestProvider final : public IProviderAdapter
 {
 public:
@@ -38,12 +71,15 @@ class ControlledBackend final : public ITerminalBackend
 {
 public:
     bool rejectStart = false;
+    bool throwStart = false;
     int terminateCount = 0;
     QByteArray input;
     QByteArray output;
     quint64 dropped = 0;
     OperationResult start(const LaunchSpec &) override
     {
+        if (throwStart)
+            throw std::runtime_error("fixture");
         return rejectStart
                    ? OperationResult::failure({ErrorCode::LaunchFailed, QStringLiteral("测试启动拒绝")})
                    : accepted();
@@ -100,6 +136,7 @@ struct Fixture
     std::shared_ptr<TestProvider> provider = std::make_shared<TestProvider>();
     QVector<ControlledBackend *> backends;
     bool rejectStart = false;
+    bool throwStart = false;
     SessionManager::Options options() const
     {
         SessionManager::Options result;
@@ -114,6 +151,7 @@ struct Fixture
         {
             auto backend = std::make_unique<ControlledBackend>();
             backend->rejectStart = rejectStart;
+            backend->throwStart = throwStart;
             backends.append(backend.get());
             return backend;
         };
@@ -125,6 +163,11 @@ class SessionManagerTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void launchExceptionIsPersisted();
+    void persistenceLifecycle();
+    void restoreMetadataOnly();
+    void persistenceFailureIsObservable();
+    void recoveredHistoryDoesNotExhaustCapacity();
     void authorization();
     void rejectedCreation();
     void lifecycleAndCapacity();
@@ -136,6 +179,118 @@ private slots:
     void reentrantNotification();
     void tailAndFinalization();
 };
+
+void SessionManagerTests::launchExceptionIsPersisted()
+{
+    Fixture fixture;
+    fixture.throwStart = true;
+    auto repository = std::make_shared<MemoryRepository>();
+    auto options = fixture.options();
+    options.repository = repository;
+    SessionManager manager(options, fixture.factory());
+    QVERIFY(manager.restoreSessions().isSuccess());
+    QVERIFY(!manager.create(request(), "alice").isSuccess());
+    QCOMPARE(repository->records.size(), 1);
+    QCOMPARE(repository->records.first().status, SessionStatus::Failed);
+    QCOMPARE(repository->records.first().failureCode, QStringLiteral("launch_failed"));
+    QCOMPARE(manager.list("alice").value().size(), 1);
+    QVERIFY(!repository->records.first().exitCodeValid);
+}
+
+void SessionManagerTests::persistenceLifecycle()
+{
+    Fixture fixture;
+    auto repository = std::make_shared<MemoryRepository>();
+    auto options = fixture.options();
+    options.repository = repository;
+    SessionManager manager(options, fixture.factory());
+    QVERIFY(!manager.create(request(), "alice").isSuccess());
+    QVERIFY(manager.restoreSessions().isSuccess());
+    repository->rejectSave = true;
+    QVERIFY(!manager.create(request(), "alice").isSuccess());
+    repository->rejectSave = false;
+    const auto created = manager.create(request(), "alice");
+    QVERIFY(created.isSuccess());
+    QVERIFY(repository->records.first().createdAtUtcMs > 0);
+    fixture.backends.last()->begin();
+    QTRY_COMPARE(repository->records.last().status, SessionStatus::Running);
+    fixture.backends.last()->end();
+    QTRY_COMPARE(repository->records.last().status, SessionStatus::Exited);
+    QVERIFY(repository->records.last().exitCodeValid);
+    QCOMPARE(repository->records.last().exitCode, 0);
+    QVERIFY(repository->records.last().updatedAtUtcMs >= repository->records.last().createdAtUtcMs);
+}
+void SessionManagerTests::recoveredHistoryDoesNotExhaustCapacity()
+{
+    Fixture fixture;
+    auto repository = std::make_shared<MemoryRepository>();
+    SessionSnapshot snapshot;
+    snapshot.id = SessionId::create();
+    snapshot.workspaceId = QStringLiteral("workspace");
+    snapshot.status = SessionStatus::Exited;
+    repository->records.append(snapshot);
+    auto options = fixture.options();
+    options.repository = repository;
+    options.maxRetainedSessions = 1;
+    SessionManager manager(options, fixture.factory());
+    QVERIFY(manager.restoreSessions().isSuccess());
+    const auto created = manager.create(request(), "alice");
+    QVERIFY(created.isSuccess());
+    QVERIFY(!manager.get(snapshot.id, "alice").isSuccess());
+    QCOMPARE(repository->records.size(), 2);
+    QVERIFY(!manager.create(request(), "alice").isSuccess());
+    fixture.backends.last()->begin();
+    QTRY_COMPARE(manager.get(created.value(), "alice").value().status, SessionStatus::Running);
+    QVERIFY(manager.attach(created.value(), "alice", AttachMode::ReadOnly).isSuccess());
+    fixture.backends.last()->end();
+    QTRY_COMPARE(manager.get(created.value(), "alice").value().status, SessionStatus::Exited);
+    QVERIFY(!manager.create(request(), "alice").isSuccess());
+    QVERIFY(manager.detach(created.value(), "alice").isSuccess());
+    QVERIFY(manager.create(request(), "alice").isSuccess());
+}
+
+void SessionManagerTests::persistenceFailureIsObservable()
+{
+    Fixture fixture;
+    auto repository = std::make_shared<MemoryRepository>();
+    auto options = fixture.options();
+    options.repository = repository;
+    SessionManager manager(options, fixture.factory());
+    QVERIFY(manager.restoreSessions().isSuccess());
+    const auto created = manager.create(request(), "alice");
+    QVERIFY(created.isSuccess());
+    QSignalSpy failure(&manager, &ISessionManager::failed);
+    repository->rejectSave = true;
+    fixture.backends.last()->begin();
+    QTRY_COMPARE(failure.count(), 1);
+    QCOMPARE(manager.get(created.value(), "alice").value().status, SessionStatus::Running);
+    QCOMPARE(repository->records.first().status, SessionStatus::Creating);
+    QVERIFY(manager.attach(created.value(), "alice", AttachMode::ReadOnly).isSuccess());
+    QCOMPARE(manager.takeOutput(created.value(), "alice", 1024).value().bytes, QByteArray());
+}
+
+void SessionManagerTests::restoreMetadataOnly()
+{
+    Fixture fixture;
+    auto repository = std::make_shared<MemoryRepository>();
+    SessionSnapshot snapshot;
+    snapshot.id = SessionId::create();
+    snapshot.workspaceId = QStringLiteral("workspace");
+    snapshot.status = SessionStatus::Failed;
+    snapshot.failureCode = QStringLiteral("agent_restarted");
+    repository->records.append(snapshot);
+    auto options = fixture.options();
+    options.repository = repository;
+    SessionManager manager(options, fixture.factory());
+    QVERIFY(manager.restoreSessions().isSuccess());
+    QVERIFY(fixture.backends.isEmpty());
+    QCOMPARE(manager.list("alice").value().size(), 1);
+    QVERIFY(manager.list("intruder").value().isEmpty());
+    QVERIFY(!manager.attach(snapshot.id, "alice", AttachMode::ReadOnly).isSuccess());
+    QVERIFY(!manager.writeInput(snapshot.id, "alice", "x").isSuccess());
+    QCOMPARE(manager.get(snapshot.id, "alice").value().failureCode, QStringLiteral("agent_restarted"));
+    QVERIFY(!manager.restoreSessions().isSuccess());
+}
 
 void SessionManagerTests::authorization()
 {

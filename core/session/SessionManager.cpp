@@ -1,5 +1,6 @@
 #include "SessionManager.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QMap>
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <limits>
 #include <map>
+#include <persistence/ISessionRepository.h>
 #include <provider/IProviderAdapter.h>
 #include <terminal/ITerminalBackend.h>
 
@@ -59,6 +61,7 @@ public:
     {
         m_clock.start();
         m_valid = validateOptions();
+        m_restored = !m_options.repository;
         m_timer.setInterval(std::max(1, std::min(m_options.writerLeaseMs, 1000)));
         QObject::connect(&m_timer, &QTimer::timeout, owner,
                          [this]
@@ -149,6 +152,17 @@ public:
         if (!authorized(session->snapshot.workspaceId, clientId))
             return Result<Session *>::failure(error(ErrorCode::PermissionDenied, "无工作区访问权限"));
         return Result<Session *>::success(session);
+    }
+    OperationResult save(Session &session)
+    {
+        session.snapshot.updatedAtUtcMs =
+            std::max(session.snapshot.updatedAtUtcMs, QDateTime::currentMSecsSinceEpoch());
+        if (!m_options.repository)
+            return accepted();
+        const auto result = m_options.repository->save(session.snapshot);
+        if (!result.isSuccess())
+            reportError(session.snapshot.id, error(ErrorCode::SystemError, "会话元数据保存失败"), false);
+        return result;
     }
     void publish(const Session &session)
     {
@@ -301,6 +315,7 @@ public:
                 if (!current || current->completed || current->snapshot.status != SessionStatus::Creating)
                     return;
                 current->snapshot.status = SessionStatus::Running;
+                save(*current);
                 publish(*current);
             },
             Qt::QueuedConnection);
@@ -324,6 +339,8 @@ public:
                 {
                     current->fatal = true;
                     current->snapshot.status = SessionStatus::Failed;
+                    current->snapshot.failureCode = QStringLiteral("backend_failed");
+                    save(*current);
                     releaseWriter(*current);
                     publish(*current);
                 }
@@ -340,6 +357,9 @@ public:
                 drain(*current, true);
                 current->completed = true;
                 current->snapshot.status = current->fatal ? SessionStatus::Failed : SessionStatus::Exited;
+                current->snapshot.exitCode = status.exitCode;
+                current->snapshot.exitCodeValid = status.exitCodeValid;
+                save(*current);
                 releaseWriter(*current);
                 // 此处理器由队列调用，后端原始 finished 发射栈已返回，可安全释放资源。
                 current->backend.reset();
@@ -359,6 +379,7 @@ public:
     QTimer m_timer;
     quint64 m_nextGeneration = 0;
     bool m_valid = false;
+    bool m_restored = false;
 };
 
 SessionManager::SessionManager(Options options, BackendFactory backendFactory, QObject *parent)
@@ -368,11 +389,43 @@ SessionManager::SessionManager(Options options, BackendFactory backendFactory, Q
 }
 SessionManager::~SessionManager() = default;
 
+OperationResult SessionManager::restoreSessions()
+{
+    auto &state = *m_state;
+    if (!state.onOwnerThread() || !state.m_valid || state.m_restored || !state.m_sessions.empty())
+        return reject(ErrorCode::InvalidState, "会话恢复调用状态无效");
+    const auto loaded = state.m_options.repository->load(state.m_options.maxRetainedSessions);
+    if (!loaded.isSuccess())
+        return OperationResult::failure(loaded.error());
+    std::map<QString, std::unique_ptr<State::Session>> restored;
+    for (const auto &snapshot : loaded.value())
+    {
+        if (!snapshot.id.isValid() ||
+            (snapshot.status != SessionStatus::Failed && snapshot.status != SessionStatus::Exited) ||
+            restored.count(snapshot.id.toString()))
+            return reject(ErrorCode::InvalidState, "持久化会话未完成重启清理或标识无效");
+        auto session = std::make_unique<State::Session>();
+        session->snapshot = snapshot;
+        session->snapshot.metadataOnly = true;
+        session->snapshot.subscriberCount = 0;
+        session->snapshot.creatorClientId.clear();
+        session->snapshot.writerClientId.clear();
+        session->snapshot.outputSequence = 0;
+        session->completed = true;
+        restored.emplace(snapshot.id.toString(), std::move(session));
+    }
+    state.m_sessions = std::move(restored);
+    state.m_restored = true;
+    return accepted();
+}
+
 Result<SessionId> SessionManager::create(const SessionRequest &request, const QString &clientId)
 {
     auto &state = *m_state;
     if (!state.onOwnerThread())
         return Result<SessionId>::failure(error(ErrorCode::InvalidState, "必须在管理器所属线程调用"));
+    if (!state.m_restored)
+        return Result<SessionId>::failure(error(ErrorCode::InvalidState, "持久化会话尚未恢复"));
     if (!state.m_valid || !validIdentity(clientId) || !validIdentity(request.workspaceId) ||
         !validIdentity(request.providerId) || !request.worktreeName.isEmpty() ||
         !request.size.validate().isSuccess())
@@ -382,7 +435,8 @@ Result<SessionId> SessionManager::create(const SessionRequest &request, const QS
     const auto live = std::count_if(state.m_sessions.cbegin(), state.m_sessions.cend(),
                                     [](const auto &entry) { return !entry.second->completed; });
     if (live >= state.m_options.maxConcurrentSessions ||
-        state.m_sessions.size() >= static_cast<size_t>(state.m_options.maxRetainedSessions))
+        (!state.m_options.repository &&
+         state.m_sessions.size() >= static_cast<size_t>(state.m_options.maxRetainedSessions)))
         return Result<SessionId>::failure(error(ErrorCode::QueueFull, "会话容量已满"));
     try
     {
@@ -402,6 +456,22 @@ Result<SessionId> SessionManager::create(const SessionRequest &request, const QS
             spec.size.rows != request.size.rows)
             return Result<SessionId>::failure(
                 error(ErrorCode::InvalidArgument, "Provider 改写了可信启动上下文"));
+        // 历史数据库仍保留记录；只回收没有订阅者的已结束内存项，为新会话让出容量。
+        if (state.m_sessions.size() >= static_cast<size_t>(state.m_options.maxRetainedSessions))
+        {
+            auto oldest = state.m_sessions.end();
+            for (auto it = state.m_sessions.begin(); it != state.m_sessions.end(); ++it)
+            {
+                if (!it->second->completed || !it->second->subscribers.isEmpty())
+                    continue;
+                if (oldest == state.m_sessions.end() ||
+                    it->second->snapshot.updatedAtUtcMs < oldest->second->snapshot.updatedAtUtcMs)
+                    oldest = it;
+            }
+            if (oldest == state.m_sessions.end())
+                return Result<SessionId>::failure(error(ErrorCode::QueueFull, "会话容量已满"));
+            state.m_sessions.erase(oldest);
+        }
         auto session = std::make_unique<State::Session>();
         session->backend = state.m_factory();
         if (!session->backend || session->backend->parent() || session->backend->thread() != thread())
@@ -412,10 +482,37 @@ Result<SessionId> SessionManager::create(const SessionRequest &request, const QS
         session->snapshot.providerId = request.providerId;
         session->snapshot.workspaceId = request.workspaceId;
         session->snapshot.creatorClientId = clientId;
+        session->snapshot.createdAtUtcMs = QDateTime::currentMSecsSinceEpoch();
+        const auto saved = state.save(*session);
+        if (!saved.isSuccess())
+            return Result<SessionId>::failure(saved.error());
         state.connectBackend(*session);
-        const auto started = session->backend->start(spec);
+        const auto started = [&]()
+        {
+            try
+            {
+                return session->backend->start(spec);
+            }
+            catch (...)
+            {
+                return reject(ErrorCode::LaunchFailed, "终端启动异常");
+            }
+        }();
         if (!started.isSuccess())
+        {
+            session->snapshot.status = SessionStatus::Failed;
+            session->snapshot.failureCode = QStringLiteral("launch_failed");
+            session->completed = true;
+            session->backend.reset();
+            state.save(*session);
+            if (state.m_options.repository)
+            {
+                const auto failedId = session->snapshot.id.toString();
+                const auto inserted = state.m_sessions.emplace(failedId, std::move(session));
+                state.publish(*inserted.first->second);
+            }
             return Result<SessionId>::failure(started.error());
+        }
         const auto id = session->snapshot.id;
         const auto inserted = state.m_sessions.emplace(id.toString(), std::move(session));
         state.publish(*inserted.first->second);
@@ -462,6 +559,8 @@ OperationResult SessionManager::attach(SessionId id, const QString &clientId, At
     if (mode != AttachMode::ReadOnly && mode != AttachMode::ReadWrite)
         return reject(ErrorCode::InvalidArgument, "订阅模式无效");
     auto &session = *access.value();
+    if (session.snapshot.metadataOnly)
+        return reject(ErrorCode::InvalidState, "历史会话仅保留元数据，原进程及终端历史不可恢复");
     m_state->expireLease(session);
     const auto existing = session.subscribers.constFind(clientId);
     if (existing != session.subscribers.cend())
@@ -585,6 +684,7 @@ OperationResult SessionManager::terminate(SessionId id, const QString &clientId)
         if (!result.isSuccess())
             return result;
         session.snapshot.status = SessionStatus::Exiting;
+        m_state->save(session);
         m_state->releaseWriter(session);
         m_state->publish(session);
         return accepted();

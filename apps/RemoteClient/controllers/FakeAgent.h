@@ -25,6 +25,7 @@ public:
     };
     using Completion = std::function<void(const QString &error, const QString &sessionId)>;
     explicit FakeAgent(QObject *parent = nullptr);
+    explicit FakeAgent(QVector<ClientSession> sessions, QObject *parent = nullptr);
     bool isConnected() const override;
     bool isSimulation() const override
     {

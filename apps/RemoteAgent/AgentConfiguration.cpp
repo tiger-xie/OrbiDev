@@ -76,9 +76,18 @@ Result<AgentConfiguration> loadAgentConfiguration(const QString &path)
     if (parseError.error != QJsonParseError::NoError || !document.isObject() || !uniqueJsonKeys(bytes))
         return reject("配置 JSON 无效或包含重复键");
     const auto root = document.object();
-    if (!keysAllowed(root, {"bind", "port", "clients", "workspaces", "fake_cli_path"}))
+    if (!keysAllowed(root, {"bind", "port", "clients", "workspaces", "fake_cli_path", "data_directory"}))
         return reject("配置包含未知字段");
     AgentConfiguration configuration;
+    configuration.dataDirectory = QFileInfo(path).absoluteDir().filePath(QStringLiteral("agent-data"));
+    if (root.contains("data_directory"))
+    {
+        const QString directory = root["data_directory"].toString();
+        if (!root["data_directory"].isString() || directory.isEmpty() || directory.contains(QChar::Null) ||
+            !QDir::isAbsolutePath(directory))
+            return reject("data_directory 必须是绝对目录路径");
+        configuration.dataDirectory = QDir::cleanPath(directory);
+    }
     // 列举当前使用单帧；限制保留数量，确保最长转义名称也不会超过协议的 64 KiB 上限。
     configuration.sessions.maxRetainedSessions = 32;
     configuration.server.bindAddress = QHostAddress::LocalHost;

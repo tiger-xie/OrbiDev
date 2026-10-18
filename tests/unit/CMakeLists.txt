@@ -19,3 +19,17 @@ add_test(NAME core.session_manager COMMAND ${CMAKE_COMMAND} -E env
     "PATH=${RAD_QT_BIN};$ENV{PATH}" $<TARGET_FILE:RADSessionManagerTests>
     -o "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/session-manager.xml,junitxml")
 set_tests_properties(core.session_manager PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+
+add_executable(RADSessionRepositoryTests SessionRepositoryTests.cpp)
+rad_configure_target(RADSessionRepositoryTests)
+target_link_libraries(RADSessionRepositoryTests PRIVATE RADPersistence Qt5::Test)
+add_test(NAME storage.sessions COMMAND ${CMAKE_COMMAND} -E env
+    "PATH=${RAD_QT_BIN};$ENV{PATH}" $<TARGET_FILE:RADSessionRepositoryTests>)
+set_tests_properties(storage.sessions PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+
+add_executable(RADDiagnosticLogTests DiagnosticLogTests.cpp)
+rad_configure_target(RADDiagnosticLogTests)
+target_link_libraries(RADDiagnosticLogTests PRIVATE RADDiagnostics Qt5::Test)
+add_test(NAME diagnostics.rotation COMMAND ${CMAKE_COMMAND} -E env
+    "PATH=${RAD_QT_BIN};$ENV{PATH}" $<TARGET_FILE:RADDiagnosticLogTests>)
+set_tests_properties(diagnostics.rotation PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)

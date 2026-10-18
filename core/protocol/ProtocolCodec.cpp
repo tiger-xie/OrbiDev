@@ -5,6 +5,7 @@
 #include <QUuid>
 #include <QtEndian>
 #include <cmath>
+#include <limits>
 namespace rad::protocol
 {
 namespace
@@ -95,13 +96,36 @@ bool state(const QJsonValue &value)
     return value.isString() &&
            QStringList{"creating", "running", "exiting", "exited", "failed"}.contains(value.toString());
 }
+bool diagnostics(const QJsonObject &payload)
+{
+    if (!payload.contains("diagnostics"))
+        return true;
+    if (!payload["diagnostics"].isObject())
+        return false;
+    const auto value = payload["diagnostics"].toObject();
+    if (!fields(value, {"created_at_utc_ms", "updated_at_utc_ms", "exit_code_valid", "exit_code",
+                        "failure_code", "metadata_only"}))
+        return false;
+    if (!counter(value["created_at_utc_ms"]) || !counter(value["updated_at_utc_ms"]))
+        return false;
+    const auto created = value["created_at_utc_ms"].toString().toULongLong();
+    const auto updated = value["updated_at_utc_ms"].toString().toULongLong();
+    return created <= updated && updated <= static_cast<quint64>(std::numeric_limits<qint64>::max()) &&
+           value["exit_code_valid"].isBool() && value["metadata_only"].isBool() &&
+           integer(value["exit_code"], std::numeric_limits<int>::min(), std::numeric_limits<int>::max()) &&
+           value["failure_code"].isString() &&
+           QStringList{"", "agent_restarted", "launch_failed", "backend_failed"}.contains(
+               value["failure_code"].toString());
+}
 bool summary(const QJsonObject &payload)
 {
     return fields(payload,
-                  {"session_id", "name", "provider_id", "workspace_id", "process_state", "attachable"}) &&
-           isCanonicalUuid(payload["session_id"].toString()) && text(payload["name"], 256) &&
-           text(payload["provider_id"], 128) && text(payload["workspace_id"], 128) &&
-           state(payload["process_state"]) && payload["attachable"].isBool();
+                  {"session_id", "name", "provider_id", "workspace_id", "process_state", "attachable"},
+                  {"diagnostics"}) &&
+           diagnostics(payload) && isCanonicalUuid(payload["session_id"].toString()) &&
+           text(payload["name"], 256) && text(payload["provider_id"], 128) &&
+           text(payload["workspace_id"], 128) && state(payload["process_state"]) &&
+           payload["attachable"].isBool();
 }
 bool payloadValid(const Envelope &message)
 {
@@ -135,8 +159,8 @@ bool payloadValid(const Envelope &message)
         return fields(p, {}, {"last_ack_sequence"}) &&
                (!p.contains("last_ack_sequence") || counter(p["last_ack_sequence"]));
     if (type == "session.created" || type == "session.status")
-        return fields(p, {"process_state", "attachable"}) && state(p["process_state"]) &&
-               p["attachable"].isBool();
+        return fields(p, {"process_state", "attachable"}, {"diagnostics"}) && diagnostics(p) &&
+               state(p["process_state"]) && p["attachable"].isBool();
     if (type == "session.attached")
         return fields(p, {"mode"}, {"replay_end_sequence"}) &&
                (p["mode"] == QJsonValue("read_only") || p["mode"] == QJsonValue("read_write")) &&

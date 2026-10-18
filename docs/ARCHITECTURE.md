@@ -29,7 +29,7 @@
 ## 运行与错误边界
 
 - Client 默认显示原生基础界面，以内存 FakeAgent 验证会话操作；指定 --agent-url 和 --workspace 后切换真实网络终端。--smoke-test 单独打开原 WebEngine 内嵌页面，CSP 不允许外部资源。
-- Agent 默认说明当前未监听后退出；显式 --config 才进入经鉴权的常驻服务。`--smoke-test` 才创建 SQLite 内存数据库，不写业务数据文件。
+- Agent 默认说明当前未监听后退出；显式 --config 才进入经鉴权的常驻服务。`--smoke-test` 只创建 SQLite 内存数据库；M5-02 的 --config 服务模式会写入元数据和诊断日志。
 - 两个程序的 `--smoke-test` 必须通过真实运行检查后返回 0；失败返回非零，Client 有超时限制。
 - M0 的 detach、持久化、鉴权等约束不因建立工程骨架而改变。
 
@@ -63,7 +63,7 @@ RADAgentTransport 位于 core/transport，依赖 RADCore、RADProtocol、Qt Netw
 
 握手 Authorization 令牌匹配静态 SHA-256 摘要后确定 clientId，hello 只做版本协商。每身份一个连接，每次会话操作继续验证 ACL；断线/超时/背压只 detach。输入按每订阅帧序号拒绝重放，输出采用绝对字节偏移；重连有限历史重放不等于精确画面恢复。
 
-默认不监听，配置后只允许本机 IPv4 回环或本机 Tailscale 地址范围；不修改系统网络配置，不新增依赖。配对 UI、DPAPI、持久化日志、真正跨端验证留给后续阶段。配置与验收见 [M3-02 说明](M3-02_AgentWebSocket服务.md)。
+默认不监听，配置后只允许本机 IPv4 回环或本机 Tailscale 地址范围；不修改系统网络配置，不新增依赖。配对 UI、DPAPI、真正跨端验证留给后续阶段；M5-02 已接入持久化诊断日志。配置与验收见 [M3-02 说明](M3-02_AgentWebSocket服务.md)。
 
 ## M4-01 客户端基础界面
 
@@ -80,3 +80,9 @@ RADClientTransport 位于 core/transport，实现 QtCore 的 IAgentClient 契约
 显式重连重新查询原 SessionId，用户重新附加后创建新终端视图，重放 Agent 当前保留的原始输出；旧页面的输入、输出、尺寸、就绪和失败回调不得影响新连接。首次输出前允许一次合法截断声明，后续严格验证字节偏移；持续输出中的缺口仍断开并要求重新附加。
 
 ClientSession.historyNotice 提供独立且持续的历史限制提示。附加响应新增 replay_end_sequence，按累计输出偏移标记历史前缀并贯穿网络、Controller 和 TerminalView；历史写入期间禁止输入及自动回复，实时输出仍正常响应。两端必须配套更新。复用 SessionManager 默认每会话 1 MiB 有限缓存，不提供精确终端快照，不自动重试输入。范围和验证见 [M5-01 说明](M5-01_断线恢复.md) 与 [ADR-020](ADR/020_有限历史断线恢复.md)。
+
+## M5-02 元数据与诊断
+
+RADPersistence 使用已有 Qt5::Sql 实现 ISessionRepository，RADCore 仅依赖抽象；RADDiagnostics 使用 QtCore 和模型枚举保存固定类别事件。Agent 从配置目录旁的 agent-data（或显式 data_directory）加载数据，在监听前完成目录锁、事务迁移、重启失效标记及 SessionManager::restoreSessions。
+
+存储只保存元数据，历史记录不创建后端且不可附加；旧活跃记录标为 Failed/agent_restarted，退出码未知。诊断对象经现有会话摘要/状态消息到达 UI，两端须配套升级。主进程日志按大小/UTC日期轮转并清理过期归档，不记录凭据或终端字节。详情、源码导航和验证见 [M5-02](M5-02_会话持久化与运行诊断.md) 与 [ADR-021](ADR/021_会话元数据与诊断存储.md)。

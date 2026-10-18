@@ -311,9 +311,11 @@ class WebSocketAgentClientTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void diagnosticStateAndAttachGuard();
     void replayBoundaryMarksOnlyHistory();
     void missingReplayBoundaryRejectsAttach();
     void retainedTailRemainsWritable();
+    void largeInputRemainsWritable();
     void invalidOverrun_data();
     void invalidOverrun();
     void endpointValidationAndAuthentication();
@@ -328,6 +330,39 @@ private slots:
     void writerConflictAndWorkspaceAuthorization();
     void serverStopClearsAttachmentState();
 };
+
+void WebSocketAgentClientTests::diagnosticStateAndAttachGuard()
+{
+    ScriptedPeer peer;
+    QVERIFY(peer.server.listen(QHostAddress::LocalHost, 0));
+    WebSocketAgentClient client(peer.options());
+    QVERIFY(connectClient(client));
+    QJsonObject metadata{{"created_at_utc_ms", "1"},          {"updated_at_utc_ms", "2"},
+                         {"exit_code_valid", false},          {"exit_code", 0},
+                         {"failure_code", "agent_restarted"}, {"metadata_only", true}};
+    QVERIFY(peer.send({kProtocolVersion,
+                       "session.status",
+                       {},
+                       peer.id,
+                       {{"process_state", "failed"}, {"attachable", false}, {"diagnostics", metadata}}}));
+    QTRY_VERIFY(client.sessions().first().metadataOnly);
+    QCOMPARE(client.sessions().first().failureCode, QStringLiteral("agent_restarted"));
+    QVERIFY(!client.sessions().first().exitCodeKnown);
+    const auto attached = complete([&](auto completion) { client.attachSession(peer.id, completion); });
+    QVERIFY(attached.completed);
+    QVERIFY(!attached.error.isEmpty());
+    QVERIFY(!client.sessions().first().attached);
+    metadata["failure_code"] = "";
+    metadata["exit_code_valid"] = true;
+    metadata["exit_code"] = -1;
+    QVERIFY(peer.send({kProtocolVersion,
+                       "session.status",
+                       {},
+                       peer.id,
+                       {{"process_state", "exited"}, {"attachable", false}, {"diagnostics", metadata}}}));
+    QTRY_VERIFY(client.sessions().first().exitCodeKnown);
+    QCOMPARE(client.sessions().first().exitCode, -1);
+}
 
 void WebSocketAgentClientTests::replayBoundaryMarksOnlyHistory()
 {
@@ -375,6 +410,8 @@ void WebSocketAgentClientTests::retainedTailRemainsWritable()
         });
     QVERIFY(fixture.server.start().isSuccess());
     WebSocketAgentClient client(fixture.clientOptions());
+    QSignalSpy errors(&client, &IAgentClient::errorOccurred);
+    QSignalSpy audits(&fixture.server, &AgentWebSocketServer::auditEvent);
     OutputCapture capture(client);
     QVERIFY(connectClient(client));
     const QString id = createSession(client);
@@ -387,7 +424,16 @@ void WebSocketAgentClientTests::retainedTailRemainsWritable()
     QCOMPARE(client.sessions().size(), 1);
     QCOMPARE(client.sessions().first().id, id);
     QVERIFY(attachSession(client, id));
-    QVERIFY(waitUntil([&] { return capture.output[id].endsWith("retained-tail"); }));
+    const bool receivedTail = waitUntil([&] { return capture.output[id].endsWith("retained-tail"); });
+    QStringList diagnostics;
+    for (const auto &event : errors)
+        diagnostics.append(event.at(0).toString());
+    for (const auto &event : audits)
+        diagnostics.append(event.at(0).toString());
+    QVERIFY2(receivedTail, qPrintable(QStringLiteral("connected=%1 bytes=%2 events=%3")
+                                          .arg(client.isConnected())
+                                          .arg(capture.output[id].size())
+                                          .arg(diagnostics.join(QLatin1Char(',')))));
     QVERIFY(client.isConnected());
     QVERIFY(client.sessions().first().historyNotice.contains(QStringLiteral("不可恢复")));
     const QString notice = client.sessions().first().historyNotice;
@@ -398,6 +444,28 @@ void WebSocketAgentClientTests::retainedTailRemainsWritable()
     QString error;
     QVERIFY(client.sendInput(id, "after-reconnect", error));
     QVERIFY(waitUntil([&] { return backend->input == "after-reconnect"; }));
+}
+
+void WebSocketAgentClientTests::largeInputRemainsWritable()
+{
+    DelayedBackend *backend = nullptr;
+    Fixture fixture(
+        [&]
+        {
+            auto instance = std::make_unique<DelayedBackend>(0);
+            backend = instance.get();
+            return instance;
+        });
+    QVERIFY(fixture.server.start().isSuccess());
+    WebSocketAgentClient client(fixture.clientOptions());
+    QVERIFY(connectClient(client));
+    const QString id = createSession(client);
+    QVERIFY(attachSession(client, id));
+    const QByteArray input(256 * 1024, 'x');
+    QString error;
+    QVERIFY(client.sendInput(id, input, error));
+    QVERIFY(waitUntil([&] { return backend->input == input; }));
+    QVERIFY(client.isConnected());
 }
 
 void WebSocketAgentClientTests::invalidOverrun_data()

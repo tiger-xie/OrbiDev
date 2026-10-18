@@ -40,15 +40,32 @@ private slots:
         QVERIFY(accepted.isSuccess());
         QCOMPARE(accepted.value().server.port, quint16(17890));
         QCOMPARE(accepted.value().sessions.maxRetainedSessions, 32);
+        QCOMPARE(accepted.value().dataDirectory, directory.filePath(QStringLiteral("agent-data")));
+        auto storageConfig = valid;
+        storageConfig["data_directory"] = directory.filePath(QStringLiteral("自定义数据"));
+        const auto customStorage = parse(QJsonDocument(storageConfig).toJson());
+        QVERIFY(customStorage.isSuccess());
+        QCOMPARE(customStorage.value().dataDirectory, storageConfig["data_directory"].toString());
+        storageConfig["data_directory"] = "relative";
+        QVERIFY(!parse(QJsonDocument(storageConfig).toJson()).isSuccess());
+        storageConfig["data_directory"] = 42;
+        QVERIFY(!parse(QJsonDocument(storageConfig).toJson()).isSuccess());
         // 非空控制字符每个编码为六字节，覆盖合法名称的最坏 JSON 膨胀。
         QJsonArray summaries;
         for (int index = 0; index < accepted.value().sessions.maxRetainedSessions; ++index)
-            summaries.append(QJsonObject{{"session_id", rad::SessionId::create().toString()},
-                                         {"name", QString(256, QChar(1))},
-                                         {"provider_id", "fake"},
-                                         {"workspace_id", QString(64, QLatin1Char('w'))},
-                                         {"process_state", "creating"},
-                                         {"attachable", false}});
+            summaries.append(
+                QJsonObject{{"session_id", rad::SessionId::create().toString()},
+                            {"name", QString(256, QChar(1))},
+                            {"provider_id", "fake"},
+                            {"workspace_id", QString(64, QLatin1Char('w'))},
+                            {"process_state", "creating"},
+                            {"attachable", false},
+                            {"diagnostics", QJsonObject{{"created_at_utc_ms", "9223372036854775807"},
+                                                        {"updated_at_utc_ms", "9223372036854775807"},
+                                                        {"exit_code", -2147483647},
+                                                        {"exit_code_valid", true},
+                                                        {"failure_code", "agent_restarted"},
+                                                        {"metadata_only", true}}}});
         const rad::protocol::Envelope listed{rad::kProtocolVersion,
                                              "session.listed",
                                              rad::SessionId::create().toString(),

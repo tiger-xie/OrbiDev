@@ -164,8 +164,14 @@ struct SessionSnapshot
     QString workspaceId;
     SessionStatus status = SessionStatus::Creating;
     int subscriberCount = 0;
-    QString creatorClientId;    // 用于启动完成前取消，仍须通过授权校验。
-    QString writerClientId;     // 空表示无写者；进程状态不随附加/分离改变。
+    QString creatorClientId; // 用于启动完成前取消，仍须通过授权校验。
+    QString writerClientId;  // 空表示无写者；进程状态不随附加/分离改变。
+    qint64 createdAtUtcMs = 0;
+    qint64 updatedAtUtcMs = 0;
+    int exitCode = 0;
+    bool exitCodeValid = false;
+    QString failureCode;        // 固定诊断类别，不保存后端错误原文或终端内容。
+    bool metadataOnly = false;  // 从数据库加载，当前 Agent 没有对应进程及回放历史。
     quint64 outputSequence = 0; // 累计原始输出末尾偏移，包含已丢弃字节，用于附加时确定回放边界。
 };
 

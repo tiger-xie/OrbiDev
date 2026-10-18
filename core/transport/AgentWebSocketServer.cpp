@@ -1,4 +1,5 @@
 #include "AgentWebSocketServer.h"
+#include "WebSocketReadBuffer.h"
 
 #include <QCryptographicHash>
 #include <QElapsedTimer>
@@ -63,7 +64,13 @@ QString stateName(SessionStatus status)
 QJsonObject statusPayload(const SessionSnapshot &snapshot)
 {
     return {{"process_state", stateName(snapshot.status)},
-            {"attachable", snapshot.status != SessionStatus::Creating}};
+            {"attachable", snapshot.status != SessionStatus::Creating && !snapshot.metadataOnly},
+            {"diagnostics", QJsonObject{{"created_at_utc_ms", QString::number(snapshot.createdAtUtcMs)},
+                                        {"updated_at_utc_ms", QString::number(snapshot.updatedAtUtcMs)},
+                                        {"exit_code_valid", snapshot.exitCodeValid},
+                                        {"exit_code", snapshot.exitCode},
+                                        {"failure_code", snapshot.failureCode},
+                                        {"metadata_only", snapshot.metadataOnly}}}};
 }
 bool constantEqual(const QByteArray &left, const QByteArray &right)
 {
@@ -222,7 +229,7 @@ public:
             if (!socket)
                 continue;
             socket->setParent(&m_owner);
-            socket->setReadBufferSize(wire::kMaxFrameBytes);
+            configureWebSocketReadBuffer(*socket);
             socket->setMaxAllowedIncomingFrameSize(wire::kMaxFrameBytes);
             socket->setMaxAllowedIncomingMessageSize(wire::kMaxFrameBytes);
             const QByteArray authorization = socket->request().rawHeader("Authorization");

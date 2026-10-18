@@ -5,7 +5,7 @@ target_link_libraries(RemoteAgent PRIVATE RADCore RADProtocol Qt5::Core Qt5::Sql
 if(RAD_BUILD_WINDOWS_BACKEND)
     target_sources(RemoteAgent PRIVATE AgentConfiguration.cpp AgentConfiguration.h)
     target_compile_definitions(RemoteAgent PRIVATE RAD_AGENT_SERVER)
-    target_link_libraries(RemoteAgent PRIVATE RADAgentTransport RADWindowsTerminal RADFakeCliProvider)
+    target_link_libraries(RemoteAgent PRIVATE RADAgentTransport RADWindowsTerminal RADFakeCliProvider RADPersistence RADDiagnostics)
     rad_deploy_conpty(RemoteAgent)
 endif()
 

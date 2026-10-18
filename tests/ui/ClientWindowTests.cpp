@@ -99,6 +99,36 @@ class ClientWindowTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void restartedSessionIsClearlyInvalid()
+    {
+        ClientSession session;
+        session.id = QStringLiteral("historical-session");
+        session.name = QStringLiteral("重启前的终端");
+        session.workspace = QStringLiteral("OrbiDev");
+        session.running = false;
+        session.exitCodeKnown = false;
+        session.processState = QStringLiteral("failed");
+        session.failureCode = QStringLiteral("agent_restarted");
+        session.metadataOnly = true;
+        FakeAgent agent(QVector<ClientSession>{session});
+        ClientController controller(&agent);
+        ClientWindow window(&controller);
+        window.show();
+        controller.connectAgent();
+        QTRY_VERIFY(controller.isConnected() && !controller.isBusy());
+        auto *tree = window.findChild<QTreeView *>(QStringLiteral("sessionTree"));
+        QVERIFY(tree && tree->model());
+        const auto workspace = tree->model()->index(0, 0);
+        const auto terminal = tree->model()->index(0, 0, workspace);
+        QVERIFY(terminal.isValid());
+        const auto text = terminal.data().toString();
+        QVERIFY(text.contains(QStringLiteral("Agent 重启")));
+        QVERIFY(text.contains(QStringLiteral("不可恢复")));
+        QVERIFY(!text.contains(QStringLiteral("运行中")));
+        const auto screenshot = qEnvironmentVariable("RAD_M52_UI_SCREENSHOT");
+        if (!screenshot.isEmpty())
+            QVERIFY(window.grab().save(screenshot));
+    }
     void connectionAndEmptyState()
     {
         WindowFixture fixture;

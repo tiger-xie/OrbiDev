@@ -14,6 +14,10 @@ FakeAgent::FakeAgent(QObject *parent) : IAgentClient(parent)
     m_sessions[1].writerAvailable = false;
     m_sessions[2].running = false;
 }
+FakeAgent::FakeAgent(QVector<ClientSession> sessions, QObject *parent)
+    : IAgentClient(parent), m_sessions(std::move(sessions))
+{
+}
 bool FakeAgent::isConnected() const
 {
     return m_connected;

@@ -95,3 +95,5 @@ Qt 的 pending 队列上限与 HTTP Upgrade 超时不等于完整握手洪泛防
 - 额外启动真实 Debug RemoteAgent EXE，使用忽略目录内的回环测试配置完成 hello/list/create/attach/echo/terminate；确认日志不含测试令牌，显式终止会话后清理测试 Agent。此流程在最后修复后复验通过。
 - clang-format、Git 差异和文档相对链接检查通过。独立审查发现的列表大小问题已加入回归并修复。
 - 未执行 Debug WebEngine 全套复验、VS F5 断点、Ctrl+C 退出的自动化测试或跨机器远程联调。先前 Debug WebEngine 超时不因此标为解决。
+
+M5-02 起，--config 启动服务默认在配置文件旁的 agent-data 保存元数据及诊断日志，可用绝对 data_directory 覆盖。第二实例不能共享正在使用的数据目录，启动失败不会自动清空数据库。原命令行及双击脚本无需增加参数；Client/Agent 须配套更新。参见 [M5-02 运行与验收](M5-02_会话持久化与运行诊断.md)。

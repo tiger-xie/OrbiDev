@@ -51,12 +51,15 @@ private:
 
 QString processText(const ClientSession &session, bool connected)
 {
+    if (session.failureCode == QStringLiteral("agent_restarted"))
+        return connected ? QObject::tr("已失效 · Agent 重启，原进程不可恢复")
+                         : QObject::tr("最后已知：Agent 重启后失效");
     const auto state = session.running         ? QObject::tr("运行中")
                        : session.exitCodeKnown ? QObject::tr("已退出 · 退出码 %1").arg(session.exitCode)
                        : session.processState == QStringLiteral("creating") ? QObject::tr("正在创建")
                        : session.processState == QStringLiteral("exiting")  ? QObject::tr("正在退出")
                        : session.processState == QStringLiteral("failed")
-                           ? QObject::tr("启动失败")
+                           ? QObject::tr("会话失败")
                            : QObject::tr("已退出 · 退出码未提供");
     return connected ? state : QObject::tr("最后已知：%1").arg(state);
 }

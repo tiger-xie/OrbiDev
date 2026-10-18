@@ -23,6 +23,8 @@ struct ClientSession
     bool exitCodeKnown = true;
     // 本次附加的历史完整性提示；状态和列表刷新必须保留，由新附加重新设置。
     QString historyNotice;
+    QString failureCode;
+    bool metadataOnly = false;
 };
 
 // 同一 Qt 事件线程调用；借用者必须先于本对象销毁。
