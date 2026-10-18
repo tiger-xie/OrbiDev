@@ -131,11 +131,11 @@ EnvironmentStatus inspectClientEnvironment()
     return result;
 }
 
-ConnectionResult testConnection(const ConnectionProfile &profile)
+bool prepareSshArguments(const ConnectionProfile &profile, const QString &trustedDirectoryPath,
+                         QStringList &preparedArguments, QString &error, bool interactive)
 {
-    ConnectionResult result;
-    if (!validateProfile(profile, result.details))
-        return result;
+    if (!validateProfile(profile, error))
+        return false;
     QStringList arguments{QStringLiteral("-F"), QStringLiteral("NUL"),
                           QStringLiteral("-o"), QStringLiteral("IdentityAgent=none"),
                           QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
@@ -149,8 +149,8 @@ ConnectionResult testConnection(const ConnectionProfile &profile)
     {
         if (!QFileInfo(profile.identityFile).isFile())
         {
-            result.details = QStringLiteral("所选本机密钥文件不存在。");
-            return result;
+            error = QStringLiteral("所选本机密钥文件不存在。");
+            return false;
         }
         arguments << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes") << QStringLiteral("-i")
                   << profile.identityFile;
@@ -161,8 +161,8 @@ ConnectionResult testConnection(const ConnectionProfile &profile)
              {QStringLiteral("-G"), QStringLiteral("-p"), QString::number(profile.port), profile.host},
              effective))
     {
-        result.details = QStringLiteral("无法解析 SSH 配置，请检查 OpenSSH 客户端。");
-        return result;
+        error = QStringLiteral("无法解析 SSH 配置，请检查 OpenSSH 客户端。");
+        return false;
     }
     QString resolvedHost = profile.host;
     QString resolvedUser = profile.user;
@@ -172,6 +172,84 @@ ConnectionResult testConnection(const ConnectionProfile &profile)
             resolvedHost = QString::fromUtf8(line.mid(9)).trimmed();
         else if (profile.user.isEmpty() && line.startsWith("user "))
             resolvedUser = QString::fromUtf8(line.mid(5)).trimmed();
+    }
+    if (!profile.hostFingerprint.isEmpty())
+    {
+        QByteArray scanned;
+        if (trustedDirectoryPath.isEmpty() || !QDir::isAbsolutePath(trustedDirectoryPath) ||
+            !QDir(trustedDirectoryPath).exists() ||
+            !run(openSshTool(QStringLiteral("ssh-keyscan.exe")),
+                 {QStringLiteral("-T"), QStringLiteral("5"), QStringLiteral("-t"), QStringLiteral("ed25519"),
+                  QStringLiteral("-p"), QString::number(profile.port), resolvedHost},
+                 scanned))
+        {
+            error = QStringLiteral("无法读取家庭主机公钥；未建立信任。");
+            return false;
+        }
+        QString trustedKey;
+        for (const auto &line : scanned.split('\n'))
+        {
+            if (line.startsWith('#'))
+                continue;
+            const int offset = line.indexOf("ssh-ed25519 ");
+            QString normalized, fingerprint, keyError;
+            if (offset >= 0 &&
+                validatePublicKey(QString::fromUtf8(line.mid(offset)).trimmed(), normalized, fingerprint,
+                                  keyError) &&
+                fingerprint == profile.hostFingerprint)
+                trustedKey = normalized;
+        }
+        if (trustedKey.isEmpty())
+        {
+            error = QStringLiteral("家庭主机指纹与已核对的指纹不一致。已停止连接，请在家庭电脑重新核对。");
+            return false;
+        }
+        QFile knownHosts(QDir(trustedDirectoryPath).filePath(QStringLiteral("known_hosts")));
+        const QString record = QStringLiteral("orbidev-verified-host ") + trustedKey + QLatin1Char('\n');
+        if (!knownHosts.open(QIODevice::WriteOnly) ||
+            knownHosts.write(record.toUtf8()) != record.toUtf8().size())
+        {
+            error = QStringLiteral("无法建立本次连接的主机信任文件。");
+            return false;
+        }
+        knownHosts.close();
+        arguments << QStringLiteral("-o") << QStringLiteral("HostKeyAlias=orbidev-verified-host")
+                  << QStringLiteral("-o")
+                  << QStringLiteral("UserKnownHostsFile=\"") + knownHosts.fileName() + QLatin1Char('"')
+                  << QStringLiteral("-o") << QStringLiteral("GlobalKnownHostsFile=NUL")
+                  << QStringLiteral("-o") << QStringLiteral("HostKeyAlgorithms=ssh-ed25519");
+    }
+    arguments << QStringLiteral("--")
+              << (resolvedUser.isEmpty() ? resolvedHost : resolvedUser + QLatin1Char('@') + resolvedHost);
+    if (interactive)
+    {
+        arguments.replace(arguments.indexOf(QStringLiteral("BatchMode=yes")), QStringLiteral("BatchMode=no"));
+        const int position = arguments.indexOf(QStringLiteral("--"));
+        arguments.insert(position, QStringLiteral("-tt"));
+    }
+    preparedArguments = arguments;
+    return true;
+}
+
+ConnectionResult testConnection(const ConnectionProfile &profile)
+{
+    ConnectionResult result;
+    if (!validateProfile(profile, result.details))
+        return result;
+    // SSH 别名先由 OpenSSH 展开，仅用于诊断目标；不执行用户提供的远端命令。
+    QByteArray effective;
+    if (!run(openSshTool(QStringLiteral("ssh.exe")),
+             {QStringLiteral("-G"), QStringLiteral("-p"), QString::number(profile.port), profile.host},
+             effective))
+    {
+        result.details = QStringLiteral("无法解析 SSH 配置，请检查 OpenSSH 客户端。");
+        return result;
+    }
+    QString resolvedHost = profile.host;
+    for (const auto &line : effective.split('\n'))
+    {
+        if (line.startsWith("hostname "))
+            resolvedHost = QString::fromUtf8(line.mid(9)).trimmed();
     }
     QTcpSocket socket;
     socket.connectToHost(resolvedHost, quint16(profile.port));
@@ -200,54 +278,9 @@ ConnectionResult testConnection(const ConnectionProfile &profile)
         return result;
     }
     QTemporaryDir trustedDirectory;
-    if (!profile.hostFingerprint.isEmpty())
-    {
-        QByteArray scanned;
-        if (!trustedDirectory.isValid() ||
-            !run(openSshTool(QStringLiteral("ssh-keyscan.exe")),
-                 {QStringLiteral("-T"), QStringLiteral("5"), QStringLiteral("-t"), QStringLiteral("ed25519"),
-                  QStringLiteral("-p"), QString::number(profile.port), resolvedHost},
-                 scanned))
-        {
-            result.details = QStringLiteral("无法读取家庭主机公钥；未建立信任。");
-            return result;
-        }
-        QString trustedKey;
-        for (const auto &line : scanned.split('\n'))
-        {
-            if (line.startsWith('#'))
-                continue;
-            const int offset = line.indexOf("ssh-ed25519 ");
-            QString normalized, fingerprint, error;
-            if (offset >= 0 &&
-                validatePublicKey(QString::fromUtf8(line.mid(offset)).trimmed(), normalized, fingerprint,
-                                  error) &&
-                fingerprint == profile.hostFingerprint)
-                trustedKey = normalized;
-        }
-        if (trustedKey.isEmpty())
-        {
-            result.details =
-                QStringLiteral("家庭主机指纹与已核对的指纹不一致。已停止连接，请在家庭电脑重新核对。");
-            return result;
-        }
-        QFile knownHosts(trustedDirectory.filePath(QStringLiteral("known_hosts")));
-        const QString record = QStringLiteral("orbidev-verified-host ") + trustedKey + QLatin1Char('\n');
-        if (!knownHosts.open(QIODevice::WriteOnly) ||
-            knownHosts.write(record.toUtf8()) != record.toUtf8().size())
-        {
-            result.details = QStringLiteral("无法建立本次连接的主机信任文件。");
-            return result;
-        }
-        knownHosts.close();
-        arguments << QStringLiteral("-o") << QStringLiteral("HostKeyAlias=orbidev-verified-host")
-                  << QStringLiteral("-o")
-                  << QStringLiteral("UserKnownHostsFile=\"") + knownHosts.fileName() + QLatin1Char('"')
-                  << QStringLiteral("-o") << QStringLiteral("GlobalKnownHostsFile=NUL")
-                  << QStringLiteral("-o") << QStringLiteral("HostKeyAlgorithms=ssh-ed25519");
-    }
-    arguments << QStringLiteral("--")
-              << (resolvedUser.isEmpty() ? resolvedHost : resolvedUser + QLatin1Char('@') + resolvedHost);
+    QStringList arguments;
+    if (!prepareSshArguments(profile, trustedDirectory.path(), arguments, result.details))
+        return result;
     // 固定脚本仅检查命令位置，不启动 Claude，也不会确认工作区信任提示。
     const QString script = QStringLiteral("[Console]::WriteLine('ORBIDEV_AUTH_OK'); "
                                           "if (Get-Command claude -ErrorAction SilentlyContinue) { "

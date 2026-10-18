@@ -116,6 +116,8 @@ void TerminalViewTests::gatesInputAndResizes()
     QCOMPARE(inputs.takeFirst().at(0).toByteArray(), QStringLiteral("中文/").toUtf8());
     view.focusTerminal();
     // 使用真实浏览器焦点接收按键，验证 Qt 不把 Tab 当控件导航。
+    QApplication::setActiveWindow(&view);
+    view.focusTerminal();
     QTRY_VERIFY(QApplication::focusWidget() != nullptr);
     QWidget *focus = QApplication::focusWidget();
     QTest::keyClick(focus, Qt::Key_Tab);
@@ -166,7 +168,10 @@ void TerminalViewTests::clipboardAndNavigation()
     evaluate(view, QStringLiteral("clientTerminal.term.select(0,0,4)"));
     QCOMPARE(evaluate(view, QStringLiteral("clientTerminal.term.getSelection()")).toString(),
              QStringLiteral("safe"));
+    // 前一个测试窗口销毁后，Windows 可能尚未将焦点移交给新窗口。
+    QApplication::setActiveWindow(&view);
     view.focusTerminal();
+    QTRY_VERIFY(QApplication::focusWidget() != nullptr);
     QTest::keyClick(QApplication::focusWidget(), Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier);
     QTRY_COMPARE(QApplication::clipboard()->text(), QStringLiteral("safe"));
     QTest::keyClick(QApplication::focusWidget(), Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
