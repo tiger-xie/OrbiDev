@@ -1,6 +1,6 @@
 # OrbiDev 内嵌 SSH 工作台
 
-本轮在 `codex/ssh-setup-wizards` 分支继续开发。首次配置与家庭授权基线提交为 `2393728`；内嵌工作台为后续工作区实现。旧 Client/Agent 和外部 Windows Terminal 启动器保留。
+本轮在 `codex/ssh-setup-wizards` 分支继续开发。首次配置与家庭授权基线提交为 `2393728`；内嵌工作台基线提交为 `d59a198`。旧 Client/Agent 和外部 Windows Terminal 启动器保留。后续执行顺序见 [本分支开发计划](SSH工作台_分支开发计划.md)。
 
 ## 启动与使用
 

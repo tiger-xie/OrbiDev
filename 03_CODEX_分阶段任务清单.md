@@ -1,5 +1,7 @@
 # RADManager · Codex 分阶段开发任务清单
 
+> **当前安排（2026-10-18）**：原 Client/Agent 后续里程碑继续暂停，保留现有代码。当前在 `codex/ssh-setup-wizards` 分支开发 Qt 内嵌 SSH 工作台；后续任务以 [SSH 工作台分支开发计划](docs/SSH工作台_分支开发计划.md) 为准，下一张为 SSH-01。原里程碑顺序保留，不代表继续执行。
+
 > 与 `01_RADManager_完整开发计划.md`、`02_AGENTS.md` 配套。每一张任务卡都应在独立分支完成、验证、审查后再合并。
 
 **开发基线**：Qt 5.15.2 MSVC x64 + VS 2022 / v143 + C++20 + CMake；本机 Windows 10 IoT 企业版 LTSC x64（19044）首验。TASK-M0-01 使用纯 Win32，不链接 Qt；Qt 路径与构建配置见主计划第 3 节。
