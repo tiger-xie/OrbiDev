@@ -18,8 +18,10 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPointer>
 #include <QProcess>
 #include <QPushButton>
+#include <QScopedValueRollback>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
@@ -221,9 +223,25 @@ void WorkbenchWindow::buildUi()
             [this](int index)
             {
                 if (auto *page = m_tabs->widget(index))
+                {
                     page->setProperty("lastActivated", QVariant::fromValue(++m_activationSerial));
+                    selectTerminalProject(page);
+                    if (auto *terminal = page->findChild<rad::client::TerminalView *>())
+                        terminal->focusTerminal();
+                }
             });
     connect(m_tabs, &QTabWidget::tabCloseRequested, this, &WorkbenchWindow::closeTerminal);
+    connect(m_tabs, &QTabWidget::tabBarClicked, this,
+            [this](int index)
+            {
+                if (auto *page = m_tabs->widget(index))
+                {
+                    page->setProperty("lastActivated", QVariant::fromValue(++m_activationSerial));
+                    selectTerminalProject(page);
+                    if (auto *terminal = page->findChild<rad::client::TerminalView *>())
+                        terminal->focusTerminal();
+                }
+            });
     m_workspace->addWidget(m_tabs);
     splitter->addWidget(rail);
     splitter->addWidget(m_workspace);
@@ -426,6 +444,71 @@ void WorkbenchWindow::renderProjects()
     if (m_projects->count() > 0)
         m_projects->setCurrentRow(qBound(0, previous, m_projects->count() - 1));
     m_renderingProjects = false;
+    updateProjectLabels();
+    for (int index = 0; index < m_tabs->count(); ++index)
+        updateTerminalLabel(m_tabs->widget(index));
+}
+
+void WorkbenchWindow::updateProjectLabels()
+{
+    const QSignalBlocker blocker(m_projects);
+    for (int row = 0; row < m_projects->count(); ++row)
+    {
+        auto *item = m_projects->item(row);
+        const auto &project = m_state.projects.projects[item->data(Qt::UserRole).toInt()];
+        int count = 0;
+        for (int index = 0; index < m_tabs->count(); ++index)
+            if (m_tabs->widget(index)->property("projectId").toString() == project.id)
+                ++count;
+        item->setText(tr("%1 · %2 个标签\n%3")
+                          .arg(project.name)
+                          .arg(count)
+                          .arg(project.directory.isEmpty() ? tr("家庭用户目录") : project.directory));
+        item->setToolTip(tr("包含准备中、运行中及保留的退出标签，关闭标签后减少计数。"));
+    }
+}
+
+void WorkbenchWindow::selectTerminalProject(QWidget *page)
+{
+    const auto projectId = page->property("projectId").toString();
+    const auto hostId = m_state.projectHosts.value(projectId);
+    if (hostId.isEmpty())
+        return;
+    if (m_state.currentHostId != hostId)
+    {
+        auto next = m_state;
+        next.currentHostId = hostId;
+        if (!saveState(next))
+            return;
+        renderHosts();
+        reloadProfile();
+        renderProjects();
+    }
+    for (int row = 0; row < m_projects->count(); ++row)
+        if (m_state.projects.projects[m_projects->item(row)->data(Qt::UserRole).toInt()].id == projectId)
+        {
+            m_projects->setCurrentRow(row);
+            m_projects->scrollToItem(m_projects->item(row));
+            return;
+        }
+}
+
+void WorkbenchWindow::updateTerminalLabel(QWidget *page)
+{
+    const int index = m_tabs->indexOf(page);
+    if (index < 0 || page->property("projectId").toString().isEmpty())
+        return;
+    QString name = page->property("projectName").toString();
+    for (const auto &project : m_state.projects.projects)
+        if (project.id == page->property("projectId").toString())
+        {
+            name = project.name;
+            break;
+        }
+    const auto state = page->property("sessionClosing").toBool() ? tr("正在关闭")
+                                                                 : page->property("sessionState").toString();
+    m_tabs->setTabText(
+        index, tr("%1 #%2 · %3").arg(name).arg(page->property("sessionNumber").toULongLong()).arg(state));
 }
 
 bool WorkbenchWindow::saveProjects(const launcher::Configuration &configuration)
@@ -601,41 +684,84 @@ void WorkbenchWindow::openProject(const launcher::Project &project, bool createN
     if (existing)
     {
         m_tabs->setCurrentWidget(existing);
+        selectTerminalProject(existing);
         existing->setProperty("lastActivated", QVariant::fromValue(++m_activationSerial));
         if (auto *terminal = existing->findChild<rad::client::TerminalView *>())
             terminal->focusTerminal();
         return;
     }
+    createTerminal(project, *host);
+}
+
+void WorkbenchWindow::createTerminal(launcher::Project project, HostProfile host)
+{
+    if (m_closing || m_preview)
+        return;
     if (m_tabs->count() >= 16)
     {
         showFeedback(tr("最多同时保留 16 个终端标签，请先关闭不再使用的标签。"), true);
         return;
     }
+    const auto profile = host.connection;
     auto *page = new QWidget(m_tabs);
-    page->setProperty("hostId", hostId);
-    page->setProperty("sessionTarget", target);
+    page->setProperty("hostId", host.id);
+    page->setProperty("projectId", project.id);
+    page->setProperty("projectName", project.name);
+    page->setProperty("sessionNumber", QVariant::fromValue(++m_terminalSerial));
+    page->setProperty("sessionState", tr("准备终端"));
+    page->setProperty("sessionTarget", QStringList{host.id, project.id, project.directory, profile.host,
+                                                   profile.user, QString::number(profile.port),
+                                                   profile.identityFile, profile.hostFingerprint});
     page->setProperty("sessionPending", true);
     page->setProperty("columns", 120);
     page->setProperty("rows", 32);
     auto *layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
     auto *status = new QLabel(tr("正在准备终端…"), page);
+    status->setObjectName(QStringLiteral("terminalStatus"));
     status->setTextFormat(Qt::PlainText);
     status->setWordWrap(true);
     status->setContentsMargins(16, 10, 16, 10);
-    layout->addWidget(status);
+    auto *statusRow = new QHBoxLayout;
+    statusRow->addWidget(status, 1);
+    auto *reconnect = new QPushButton(tr("重新连接…"), page);
+    reconnect->setObjectName(QStringLiteral("reconnectTerminalButton"));
+    reconnect->setToolTip(tr("使用此标签创建时的主机与目录新建会话，不恢复原进程"));
+    reconnect->hide();
+    statusRow->addWidget(reconnect);
+    layout->addLayout(statusRow);
     auto *terminal = new rad::client::TerminalView(page);
     layout->addWidget(terminal, 1);
     auto *session = new SshSession(page);
-    const QString name = project.name;
     const QString directory = project.directory;
-    const int index = m_tabs->addTab(page, name + tr(" · 准备中"));
-    m_tabs->setTabToolTip(index, tr("%1@%2\n%3").arg(profile.user, profile.host, directory));
+    const int index = m_tabs->addTab(page, project.name);
+    updateTerminalLabel(page);
+    const auto destination = tr("主机：%1\n用户与地址：%2@%3:%4\n远程目录：%5")
+                                 .arg(host.name, profile.user, profile.host)
+                                 .arg(profile.port)
+                                 .arg(directory.isEmpty() ? tr("家庭用户目录") : directory);
+    page->setProperty("sessionDestination", destination);
+    m_tabs->setTabToolTip(index, destination);
     m_tabs->setCurrentIndex(index);
+    connect(reconnect, &QPushButton::clicked, page,
+            [this, page, project, host, destination]
+            {
+                if (m_closing || m_closePromptActive || page->property("sessionClosing").toBool())
+                    return;
+                QScopedValueRollback<bool> confirming(m_closePromptActive, true);
+                if (QMessageBox::question(this, tr("重新连接：新建会话"),
+                                          tr("将使用此标签创建时的目标新建 SSH 会话，不会恢复原进程。\n%1\n"
+                                             "Claude 工作区信任仍需自行确认。继续？")
+                                              .arg(destination),
+                                          QMessageBox::Yes | QMessageBox::No,
+                                          QMessageBox::No) == QMessageBox::Yes)
+                    createTerminal(project, host);
+            });
     connect(terminal, &rad::client::TerminalView::ready, page,
             [page, terminal, session, profile, directory]
             {
-                if (page->property("sessionClosing").toBool())
+                if (page->property("sessionClosing").toBool() || page->property("terminalFailed").toBool() ||
+                    !page->property("sessionPending").toBool())
                     return;
                 page->setProperty("sessionPending", false);
                 terminal->setInputEnabled(true);
@@ -653,27 +779,55 @@ void WorkbenchWindow::openProject(const launcher::Project &project, bool createN
             });
     connect(session, &SshSession::outputReady, terminal,
             [terminal](const QByteArray &bytes) { terminal->appendOutput(bytes); });
-    connect(session, &SshSession::started, page,
-            [this, page, status, name]
+    connect(session, &SshSession::hostVerificationStarted, page,
+            [this, page, status]
             {
-                status->setText(tr("SSH 进程已启动 · 正在连接；认证与 Claude 状态请查看终端。"));
-                m_tabs->setTabText(m_tabs->indexOf(page), name + tr(" · SSH 运行中"));
+                if (page->property("sessionClosing").toBool() || page->property("terminalFailed").toBool() ||
+                    page->property("sessionExited").toBool())
+                    return;
+                page->setProperty("sessionState", tr("校验主机"));
+                status->setText(tr("正在校验主机…认证与 Claude 状态随后请查看终端。"));
+                updateTerminalLabel(page);
+            });
+    connect(session, &SshSession::started, page,
+            [this, page, status]
+            {
+                if (page->property("sessionClosing").toBool() || page->property("terminalFailed").toBool() ||
+                    page->property("sessionExited").toBool())
+                    return;
+                page->setProperty("sessionState", tr("SSH 运行中"));
+                status->setText(
+                    tr("SSH 进程运行中 · 仅确认本地进程已启动；认证与 Claude 是否就绪请查看终端。"));
+                updateTerminalLabel(page);
             });
     connect(session, &SshSession::errorOccurred, page,
-            [this, page, status, name](const QString &error)
+            [this, page, status](const QString &error)
             {
-                status->setText(error);
                 page->setProperty("sessionError", error);
-                m_tabs->setTabText(m_tabs->indexOf(page), name + tr(" · 出错"));
+                if (!page->property("sessionClosing").toBool())
+                {
+                    status->setText(error);
+                    page->setProperty("sessionState", tr("出错"));
+                    updateTerminalLabel(page);
+                }
             });
     connect(session, &SshSession::exited, page,
-            [this, page, terminal, status, name](int code)
+            [this, page, terminal, status, reconnect](int code)
             {
                 terminal->setInputEnabled(false);
+                page->setProperty("sessionPending", false);
+                page->setProperty("sessionExited", true);
+                page->setProperty("sessionExitCode", code);
                 const QString error = page->property("sessionError").toString();
                 status->setText((error.isEmpty() ? QString() : error + QLatin1Char('\n')) +
-                                tr("SSH 已退出（%1）。再次打开项目将创建新会话，不会恢复原进程。").arg(code));
-                m_tabs->setTabText(m_tabs->indexOf(page), name + tr(" · 已退出"));
+                                tr("SSH 已退出（退出码 %1）。重新连接将新建会话，不会恢复原进程。"
+                                   "退出原因请结合上方错误或终端输出查看。")
+                                    .arg(code));
+                page->setProperty("sessionState", error.isEmpty() && code == 0 ? tr("已退出") : tr("失败"));
+                m_tabs->setTabToolTip(m_tabs->indexOf(page), page->property("sessionDestination").toString() +
+                                                                 QLatin1Char('\n') + status->text());
+                updateTerminalLabel(page);
+                reconnect->setVisible(!page->property("sessionClosing").toBool());
                 if (page->property("sessionClosing").toBool())
                     finishTerminalClose(page);
                 updateWorkspace();
@@ -681,34 +835,47 @@ void WorkbenchWindow::openProject(const launcher::Project &project, bool createN
                     QTimer::singleShot(0, this, [this] { close(); });
             });
     connect(terminal, &rad::client::TerminalView::failed, page,
-            [this, page, status, session, name](const QString &error)
+            [this, page, status, session, terminal, reconnect](const QString &error)
             {
                 page->setProperty("sessionPending", false);
                 page->setProperty("terminalFailed", true);
                 session->stop();
-                status->setText(error);
+                terminal->setInputEnabled(false);
                 page->setProperty("sessionError", error);
-                m_tabs->setTabText(m_tabs->indexOf(page), name + tr(" · 终端出错"));
+                if (page->property("sessionClosing").toBool())
+                    return;
+                status->setText(error + tr("\n终端失败；重新连接将新建会话，不会恢复原进程。"));
+                page->setProperty("sessionState", tr("失败"));
+                updateTerminalLabel(page);
+                reconnect->setVisible(!session->isActive());
             });
     updateWorkspace();
 }
 
 void WorkbenchWindow::closeTerminal(int index)
 {
-    QWidget *page = m_tabs->widget(index);
-    if (!page || page->property("sessionClosing").toBool())
+    const QPointer<QWidget> page(m_tabs->widget(index));
+    if (!page || m_closePromptActive || page->property("sessionClosing").toBool())
         return;
     auto *session = page->findChild<SshSession *>();
-    if ((page->property("sessionPending").toBool() || (session && session->isActive())) &&
-        QMessageBox::warning(this, tr("关闭终端"),
-                             tr("将断开此 SSH 会话，无法保证远程任务继续运行。确定关闭？"),
-                             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+    if (page->property("sessionPending").toBool() || (session && session->isActive()))
+    {
+        QScopedValueRollback<bool> confirming(m_closePromptActive, true);
+        if (QMessageBox::warning(this, tr("关闭终端"),
+                                 tr("将断开此 SSH 会话，无法保证远程任务继续运行。确定关闭？"),
+                                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return;
+    }
+    if (!page || m_tabs->indexOf(page) < 0)
         return;
     page->setProperty("sessionClosing", true);
     page->setEnabled(false);
+    page->setProperty("sessionPending", false);
+    if (auto *status = page->findChild<QLabel *>(QStringLiteral("terminalStatus")))
+        status->setText(tr("正在关闭 SSH…等待后台清理完成。"));
+    updateTerminalLabel(page);
     if (session && session->isActive())
     {
-        m_tabs->setTabText(index, tr("正在断开…"));
         session->stop();
         return;
     }
@@ -727,6 +894,11 @@ void WorkbenchWindow::finishTerminalClose(QWidget *page)
 
 void WorkbenchWindow::closeEvent(QCloseEvent *event)
 {
+    if (m_closePromptActive)
+    {
+        event->ignore();
+        return;
+    }
     if (m_setupRunning)
     {
         showFeedback(tr("首次配置向导仍在运行，请完成或关闭向导后再退出工作台。"), true);
@@ -742,19 +914,24 @@ void WorkbenchWindow::closeEvent(QCloseEvent *event)
         pending = pending || page->property("sessionPending").toBool();
         active = active || (session && session->isActive());
     }
-    if (!m_closing && (active || pending) &&
-        QMessageBox::warning(this, tr("退出工作台"),
-                             tr("将断开所有 SSH 会话，无法保证远程任务继续运行。确定退出？"),
-                             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+    if (!m_closing && (active || pending))
     {
-        event->ignore();
-        return;
+        QScopedValueRollback<bool> confirming(m_closePromptActive, true);
+        if (QMessageBox::warning(this, tr("退出工作台"),
+                                 tr("将断开所有 SSH 会话，无法保证远程任务继续运行。确定退出？"),
+                                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        {
+            event->ignore();
+            return;
+        }
     }
     m_closing = true;
     active = false;
     for (int i = 0; i < m_tabs->count(); ++i)
     {
         m_tabs->widget(i)->setProperty("sessionClosing", true);
+        m_tabs->widget(i)->setProperty("sessionPending", false);
+        updateTerminalLabel(m_tabs->widget(i));
         // 确认对话框期间仍会处理事件，需要重新检查刚启动的会话。
         auto *session = m_tabs->widget(i)->findChild<SshSession *>();
         active = active || (session && session->isActive());
@@ -881,6 +1058,7 @@ void WorkbenchWindow::showFeedback(const QString &message, bool error)
 
 void WorkbenchWindow::updateWorkspace()
 {
+    updateProjectLabels();
     m_workspace->setCurrentIndex(m_tabs->count() == 0 ? 0 : 1);
     m_summary->setText(m_tabs->count() == 0 ? tr("没有活动终端") : tr("%1 个终端标签").arg(m_tabs->count()));
     if (m_preview)

@@ -42,6 +42,10 @@ private:
     void openSelected();
     void openCurrent(bool createNew = false);
     void openProject(const launcher::Project &project, bool createNew = false);
+    void createTerminal(launcher::Project project, HostProfile host);
+    void selectTerminalProject(QWidget *page);
+    void updateProjectLabels();
+    void updateTerminalLabel(QWidget *page);
     void closeTerminal(int index);
     void finishTerminalClose(QWidget *page);
     void openSetup();
@@ -58,6 +62,8 @@ private:
     QComboBox *m_hostSelector = nullptr;
     sshsetup::ConnectionProfile m_profile;
     quint64 m_activationSerial = 0;
+    quint64 m_terminalSerial = 0;
+    bool m_closePromptActive = false;
     bool m_preview = false;
     bool m_closing = false;
     bool m_projectsReadable = true;

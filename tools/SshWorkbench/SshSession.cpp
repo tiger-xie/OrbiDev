@@ -78,6 +78,7 @@ public:
     int exitCode = -1;
     bool stopRequested = false;
     bool resizeRequested = false;
+    bool hostVerificationPending = false;
     bool startedPending = false;
     bool finished = false;
     bool attempted = false;
@@ -142,8 +143,13 @@ void SshSession::startProcess(const sshsetup::ConnectionProfile &profile, const 
                 if (program.isEmpty())
                 {
                     QStringList command;
-                    if (!remoteCommandArguments(directory, command, error) ||
-                        !sshsetup::prepareSshArguments(profile, trustDirectory.path(), arguments, error,
+                    if (!remoteCommandArguments(directory, command, error))
+                        throw std::runtime_error(error.toUtf8().constData());
+                    {
+                        std::lock_guard<std::mutex> lock(m_impl->mutex);
+                        m_impl->hostVerificationPending = true;
+                    }
+                    if (!sshsetup::prepareSshArguments(profile, trustDirectory.path(), arguments, error,
                                                        true))
                         throw std::runtime_error(error.toUtf8().constData());
                     arguments.append(command);
@@ -296,12 +302,14 @@ void SshSession::poll()
 {
     QByteArray output;
     QString error;
-    bool started = false, finished = false;
+    bool hostVerification = false, started = false, finished = false;
     int exitCode = -1;
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
         output.swap(m_impl->output);
         error.swap(m_impl->error);
+        hostVerification = m_impl->hostVerificationPending;
+        m_impl->hostVerificationPending = false;
         started = m_impl->startedPending;
         m_impl->startedPending = false;
         finished = m_impl->finished;
@@ -313,6 +321,10 @@ void SshSession::poll()
         m_impl->timer->stop();
     }
     const QPointer<SshSession> guard(this);
+    if (hostVerification)
+        emit hostVerificationStarted();
+    if (!guard)
+        return;
     if (started)
         emit this->started();
     if (!guard)

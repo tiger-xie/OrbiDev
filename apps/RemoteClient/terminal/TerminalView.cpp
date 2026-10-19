@@ -163,8 +163,15 @@ TerminalView::TerminalView(QWidget *parent) : QWidget(parent)
             });
     connect(m_bridge, &TerminalBridge::copyRequested, this, &TerminalView::copySelection);
     connect(m_bridge, &TerminalBridge::pasteRequested, this, &TerminalView::pasteClipboard);
-    m_timeout->start(20000);
-    m_view->load(terminalUrl);
+    // 窗口显示和批量构造可能同步耗时，首次事件分派前不消耗页面握手预算。
+    QTimer::singleShot(0, this,
+                       [this]
+                       {
+                           if (m_failed)
+                               return;
+                           m_timeout->start(20000);
+                           m_view->load(terminalUrl);
+                       });
 }
 
 TerminalView::~TerminalView()

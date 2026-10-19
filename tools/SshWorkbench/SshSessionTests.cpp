@@ -6,9 +6,11 @@
 #include <QFile>
 #include <QProcess>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QWebEnginePage>
 #include <QWebEngineView>
 #include <QtTest>
+#include <atomic>
 
 namespace sshworkbench
 {
@@ -96,6 +98,57 @@ private slots:
         QCOMPARE(errors.count(), 1);
         QVERIFY(!session.isActive());
     }
+    void hostVerificationIsAsynchronousAndPrecedesFailure()
+    {
+        SshSession session;
+        QSignalSpy verification(&session, &SshSession::hostVerificationStarted);
+        QSignalSpy starts(&session, &SshSession::started);
+        QSignalSpy errors(&session, &SshSession::errorOccurred);
+        QSignalSpy exits(&session, &SshSession::exited);
+        QStringList events;
+        std::atomic_bool verificationOnOwningThread{false};
+        connect(
+            &session, &SshSession::hostVerificationStarted, &session, [&session, &verificationOnOwningThread]
+            { verificationOnOwningThread = QThread::currentThread() == session.thread(); },
+            Qt::DirectConnection);
+        connect(&session, &SshSession::hostVerificationStarted, &session,
+                [&events] { events.append(QStringLiteral("verification")); });
+        connect(&session, &SshSession::errorOccurred, &session,
+                [&events] { events.append(QStringLiteral("error")); });
+        connect(&session, &SshSession::exited, &session,
+                [&events] { events.append(QStringLiteral("exit")); });
+        sshsetup::ConnectionProfile profile;
+        profile.host = QStringLiteral("-oProxyCommand=bad");
+        session.start(profile, {});
+        QCOMPARE(verification.count(), 0);
+        QCOMPARE(errors.count(), 0);
+        QCOMPARE(exits.count(), 0);
+        QVERIFY(session.isActive());
+        QTRY_COMPARE_WITH_TIMEOUT(exits.count(), 1, 3000);
+        QCOMPARE(verification.count(), 1);
+        QVERIFY(verificationOnOwningThread.load());
+        QCOMPARE(starts.count(), 0);
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(events, QStringList({QStringLiteral("verification"), QStringLiteral("error"),
+                                      QStringLiteral("exit")}));
+        QTest::qWait(40);
+        QCOMPARE(verification.count(), 1);
+        QCOMPARE(exits.count(), 1);
+    }
+    void invalidDirectoryDoesNotStartHostVerification()
+    {
+        SshSession session;
+        QSignalSpy verification(&session, &SshSession::hostVerificationStarted);
+        QSignalSpy starts(&session, &SshSession::started);
+        QSignalSpy errors(&session, &SshSession::errorOccurred);
+        QSignalSpy exits(&session, &SshSession::exited);
+        session.start({}, QStringLiteral("D:/a\nb"));
+        QTRY_COMPARE_WITH_TIMEOUT(exits.count(), 1, 3000);
+        QCOMPARE(verification.count(), 0);
+        QCOMPARE(starts.count(), 0);
+        QCOMPARE(errors.count(), 1);
+        QVERIFY(errors.first().first().toString().contains(QStringLiteral("远程目录")));
+    }
     void rejectsInvalidDirectory()
     {
         QStringList arguments;
@@ -179,6 +232,7 @@ private slots:
     void explicitStopIsIdempotent()
     {
         SshSession session;
+        QSignalSpy verification(&session, &SshSession::hostVerificationStarted);
         QSignalSpy starts(&session, &SshSession::started);
         QSignalSpy exits(&session, &SshSession::exited);
         session.startProcess({}, {}, 100, 30, fakeCli());
@@ -186,6 +240,7 @@ private slots:
         session.stop();
         session.stop();
         QTRY_COMPARE_WITH_TIMEOUT(exits.count(), 1, 10000);
+        QCOMPARE(verification.count(), 0);
         QVERIFY(!session.isActive());
     }
     void sessionsKeepIndependentInputAndExit()

@@ -1,0 +1,18 @@
+--- a/src/3rdparty/chromium/components/viz/service/display/overlay_processor_interface.cc
++++ b/src/3rdparty/chromium/components/viz/service/display/overlay_processor_interface.cc
+@@ -12,6 +12,6 @@
+ #if defined(OS_MACOSX) && !defined(TOOLKIT_QT)
+ #include "components/viz/service/display/overlay_processor_mac.h"
+-#elif defined(OS_WIN)
++#elif defined(OS_WIN) && !defined(TOOLKIT_QT)
+ #include "components/viz/service/display/overlay_processor_win.h"
+ #elif defined(OS_ANDROID)
+ #include "components/viz/service/display/overlay_processor_android.h"
+@@ -91,6 +91,6 @@
+   return base::WrapUnique(
+       new OverlayProcessorMac(could_overlay, enable_ca_overlay));
+-#elif defined(OS_WIN)
++#elif defined(OS_WIN) && !defined(TOOLKIT_QT)
+   bool enable_dc_overlay = surface_handle != gpu::kNullSurfaceHandle;
+   enable_dc_overlay &= !capabilities.supports_surfaceless;
+   enable_dc_overlay &= capabilities.supports_dc_layers;
