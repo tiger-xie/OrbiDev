@@ -19,7 +19,7 @@
 namespace sshsetup
 {
 
-WindowFrame::WindowFrame(QWidget *target) : QWidget(target), m_target(target)
+WindowFrame::WindowFrame(QWidget *target, bool dialog) : QWidget(target), m_target(target), m_dialog(dialog)
 {
     Q_ASSERT(target && target->isWindow());
     setObjectName(QStringLiteral("windowFrame"));
@@ -27,6 +27,11 @@ WindowFrame::WindowFrame(QWidget *target) : QWidget(target), m_target(target)
     setFixedHeight(40);
     setMouseTracking(true);
     target->setWindowFlag(Qt::FramelessWindowHint, true);
+    if (m_dialog)
+    {
+        target->setWindowFlag(Qt::WindowMinimizeButtonHint, false);
+        target->setWindowFlag(Qt::WindowMaximizeButtonHint, false);
+    }
     target->setMouseTracking(true);
 
     auto *layout = new QHBoxLayout(this);
@@ -55,14 +60,17 @@ WindowFrame::WindowFrame(QWidget *target) : QWidget(target), m_target(target)
         layout->addWidget(button);
         return button;
     };
-    auto *minimize = addButton(QStringLiteral("frameMinimize"), QStringLiteral("最小化"),
-                               QStringLiteral(":/resources/icon/window/minimize.svg"));
-    m_maximize = addButton(QStringLiteral("frameMaximize"), QStringLiteral("最大化"),
-                           QStringLiteral(":/resources/icon/window/maximize.svg"));
+    if (!m_dialog)
+    {
+        auto *minimize = addButton(QStringLiteral("frameMinimize"), QStringLiteral("最小化"),
+                                   QStringLiteral(":/resources/icon/window/minimize.svg"));
+        m_maximize = addButton(QStringLiteral("frameMaximize"), QStringLiteral("最大化"),
+                               QStringLiteral(":/resources/icon/window/maximize.svg"));
+        connect(minimize, &QToolButton::clicked, target, &QWidget::showMinimized);
+        connect(m_maximize, &QToolButton::clicked, this, &WindowFrame::toggleMaximized);
+    }
     auto *close = addButton(QStringLiteral("frameClose"), QStringLiteral("关闭"),
                             QStringLiteral(":/resources/icon/window/close.svg"));
-    connect(minimize, &QToolButton::clicked, target, &QWidget::showMinimized);
-    connect(m_maximize, &QToolButton::clicked, this, &WindowFrame::toggleMaximized);
     connect(close, &QToolButton::clicked, target, &QWidget::close);
     connect(target, &QWidget::windowTitleChanged, m_title, &QLabel::setText);
     connect(target, &QWidget::windowIconChanged, this, &WindowFrame::updateIcon);
@@ -104,11 +112,14 @@ void WindowFrame::updateIcon()
 void WindowFrame::updateWindowState()
 {
     const bool maximized = m_target->isMaximized();
-    m_maximize->setIcon(QIcon(maximized ? QStringLiteral(":/resources/icon/window/restore.svg")
-                                        : QStringLiteral(":/resources/icon/window/maximize.svg")));
-    const QString text = maximized ? QStringLiteral("还原") : QStringLiteral("最大化");
-    m_maximize->setAccessibleName(text);
-    m_maximize->setToolTip(text);
+    if (m_maximize)
+    {
+        m_maximize->setIcon(QIcon(maximized ? QStringLiteral(":/resources/icon/window/restore.svg")
+                                            : QStringLiteral(":/resources/icon/window/maximize.svg")));
+        const QString text = maximized ? QStringLiteral("还原") : QStringLiteral("最大化");
+        m_maximize->setAccessibleName(text);
+        m_maximize->setToolTip(text);
+    }
     if (m_resizeCursor)
     {
         m_target->unsetCursor();
@@ -118,6 +129,8 @@ void WindowFrame::updateWindowState()
 
 void WindowFrame::toggleMaximized()
 {
+    if (m_dialog)
+        return;
     if (m_target->isMaximized())
         m_target->showNormal();
     else
@@ -210,10 +223,11 @@ void WindowFrame::showSystemMenu(bool atCursor)
         return;
     }
     const bool maximized = m_target->isMaximized();
-    EnableMenuItem(menu, SC_RESTORE, MF_BYCOMMAND | (maximized ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(menu, SC_RESTORE, MF_BYCOMMAND | (!m_dialog && maximized ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(menu, SC_MINIMIZE, MF_BYCOMMAND | (m_dialog ? MF_GRAYED : MF_ENABLED));
     EnableMenuItem(menu, SC_MOVE, MF_BYCOMMAND | (maximized ? MF_GRAYED : MF_ENABLED));
     EnableMenuItem(menu, SC_SIZE, MF_BYCOMMAND | (maximized ? MF_GRAYED : MF_ENABLED));
-    EnableMenuItem(menu, SC_MAXIMIZE, MF_BYCOMMAND | (maximized ? MF_GRAYED : MF_ENABLED));
+    EnableMenuItem(menu, SC_MAXIMIZE, MF_BYCOMMAND | (m_dialog || maximized ? MF_GRAYED : MF_ENABLED));
     POINT position{0, static_cast<LONG>(height() * m_target->devicePixelRatioF())};
     const BOOL positioned = atCursor ? GetCursorPos(&position) : ClientToScreen(handle, &position);
     if (!positioned)
@@ -224,6 +238,8 @@ void WindowFrame::showSystemMenu(bool atCursor)
     const UINT command =
         TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, position.x, position.y, handle, nullptr);
     if (!command)
+        return;
+    if (m_dialog && (command == SC_MINIMIZE || command == SC_MAXIMIZE || command == SC_RESTORE))
         return;
     if (command == SC_CLOSE)
         m_target->close();

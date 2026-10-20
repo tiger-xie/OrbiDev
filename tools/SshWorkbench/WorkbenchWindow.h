@@ -35,7 +35,7 @@ private:
     void buildUi();
     void loadPreferences();
     void fitWindowToScreens(QRect restored);
-    bool savePreferences();
+    bool savePreferences(int fontSize = -1);
     void showAppearanceSettings();
     void setTerminalFontSize(int size);
     void renderHosts();

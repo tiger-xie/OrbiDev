@@ -3,20 +3,24 @@
 #include "WorkbenchWindow.h"
 #include "terminal/TerminalView.h"
 #include <QAction>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
 #include <QScreen>
+#include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
 #include <QSplitter>
@@ -406,6 +410,197 @@ private slots:
         QCOMPARE(restored.m_tabs->count(), 0);
     }
 
+    void projectDialogSaveAndOpen_data()
+    {
+        QTest::addColumn<bool>("add");
+        QTest::addColumn<bool>("open");
+        QTest::addColumn<bool>("fail");
+        QTest::addColumn<bool>("cancel");
+        QTest::newRow("create-only") << true << false << false << false;
+        QTest::newRow("create-open") << true << true << false << false;
+        QTest::newRow("save-fails") << true << true << true << false;
+        QTest::newRow("cancel") << true << true << false << true;
+        QTest::newRow("edit-only") << false << false << false << false;
+    }
+
+    void projectDialogSaveAndOpen()
+    {
+        QFETCH(bool, add);
+        QFETCH(bool, open);
+        QFETCH(bool, fail);
+        QFETCH(bool, cancel);
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        launcher::Project project{QStringLiteral("原项目"), QStringLiteral("D:/Original"), true,
+                                  QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
+        window.m_state.projects.projects = {project};
+        auto second = window.m_state.hosts.front();
+        second.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        second.name = QStringLiteral("家庭笔记本（测试）");
+        window.m_state.hosts.append(second);
+        QVERIFY(window.saveState(window.m_state));
+        window.renderHosts();
+        window.renderProjects();
+        if (fail)
+            window.m_statePath = directory.path();
+        window.show();
+        QTimer::singleShot(
+            50, &window,
+            [&]
+            {
+                auto *dialog = window.findChild<QDialog *>(QStringLiteral("workbenchDialog"));
+                QVERIFY(dialog);
+                auto *name = dialog->findChild<QLineEdit *>(QStringLiteral("projectName"));
+                auto *path = dialog->findChild<QLineEdit *>(QStringLiteral("projectDirectory"));
+                auto *hosts = dialog->findChild<QComboBox *>(QStringLiteral("projectHostChoice"));
+                auto *openOption = dialog->findChild<QCheckBox *>(QStringLiteral("openAfterSave"));
+                QVERIFY(name && path && hosts);
+                if (add)
+                {
+                    QVERIFY(openOption);
+                    QVERIFY(!openOption->isChecked());
+                    openOption->setChecked(open);
+                }
+                else
+                    QVERIFY(!openOption);
+                name->setText(QStringLiteral("文档工具"));
+                path->setText(QStringLiteral("D:/Projects/DocsTools"));
+                hosts->setCurrentIndex(hosts->findData(second.id));
+                const auto screenshot = qEnvironmentVariable("ORBIDEV_UI06_PROJECT_SCREENSHOT");
+                if (add && !open && !screenshot.isEmpty())
+                    QVERIFY(dialog->grab().save(screenshot));
+                auto *buttons = dialog->findChild<QDialogButtonBox *>();
+                if (cancel)
+                    buttons->button(QDialogButtonBox::Cancel)->click();
+                else
+                    buttons->button(QDialogButtonBox::Save)->click();
+                if (fail)
+                {
+                    QVERIFY(dialog->isVisible());
+                    QCOMPARE(name->text(), QStringLiteral("文档工具"));
+                    QVERIFY(!dialog->findChild<QLabel *>(QStringLiteral("dialogError"))->text().isEmpty());
+                    QCOMPARE(window.m_tabs->count(), 0);
+                    dialog->reject();
+                }
+            });
+        window.editProject(add);
+        const bool opened = open && !fail && !cancel;
+        QCOMPARE(window.m_tabs->count(), opened ? 1 : 0);
+        if (opened)
+        {
+            auto *page = window.m_tabs->currentWidget();
+            auto *terminal = page->findChild<rad::client::TerminalView *>();
+            QObject::disconnect(terminal, nullptr, page, nullptr);
+            QCOMPARE(page->property("hostId").toString(), second.id);
+            QVERIFY(!page->findChild<sshworkbench::SshSession *>()->isActive());
+        }
+        QCOMPARE(window.m_state.projects.projects.size(), add && !fail && !cancel ? 2 : 1);
+        if (!fail && !cancel)
+            QCOMPARE(window.m_state.projectHosts.value(window.m_state.projects.projects.back().id),
+                     second.id);
+    }
+
+    void projectDialogLongFieldsFit()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        launcher::Project project{
+            QStringLiteral("项目"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
+        window.m_state.hosts.front().name = QStringLiteral("家庭开发电脑与长期项目验证环境").repeated(4);
+        QTimer::singleShot(
+            50, &window,
+            [&]
+            {
+                auto *dialog = window.findChild<QDialog *>(QStringLiteral("workbenchDialog"));
+                QVERIFY(dialog);
+                dialog->resize(480, 440);
+                auto *name = dialog->findChild<QLineEdit *>(QStringLiteral("projectName"));
+                auto *path = dialog->findChild<QLineEdit *>(QStringLiteral("projectDirectory"));
+                name->setText(QStringLiteral("很长的中文项目名称").repeated(8));
+                path->setText(QStringLiteral("D:/") + QStringLiteral("long-folder/").repeated(60));
+                QTest::qWait(50);
+                QCOMPARE(dialog->size(), QSize(480, 440));
+                auto *scroll = dialog->findChild<QScrollArea *>(QStringLiteral("dialogScroll"));
+                QVERIFY(scroll);
+                QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+                QVERIFY(scroll->verticalScrollBar()->maximum() > 0);
+                auto *footer = dialog->findChild<QWidget *>(QStringLiteral("dialogFooter"));
+                QVERIFY(dialog->rect().contains(QRect(footer->mapTo(dialog, QPoint()), footer->size())));
+                QVERIFY(path->width() < dialog->width());
+                const auto screenshot = qEnvironmentVariable("ORBIDEV_UI06_PROJECT_SCREENSHOT");
+                if (!screenshot.isEmpty())
+                    QVERIFY(dialog->grab().save(screenshot + QStringLiteral(".narrow.png")));
+                QTest::keyClick(dialog, Qt::Key_Escape);
+            });
+        window.editProject(true);
+        QCOMPARE(window.m_tabs->count(), 0);
+        QVERIFY(!QFileInfo::exists(window.m_statePath));
+    }
+
+    void hostDialogSaveFailureCanRetry()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        launcher::Project project{
+            QStringLiteral("项目"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
+        window.m_state.projects.projects = {project};
+        QVERIFY(window.saveState(window.m_state));
+        const QString validPath = window.m_statePath;
+        window.m_statePath = directory.path();
+        QTimer::singleShot(50, &window,
+                           [&]
+                           {
+                               auto *dialog = window.findChild<QDialog *>(QStringLiteral("workbenchDialog"));
+                               QVERIFY(dialog);
+                               auto *name = dialog->findChild<QLineEdit *>(QStringLiteral("hostNameEdit"));
+                               QVERIFY(name);
+                               name->setText(QStringLiteral("更新后的家庭主机"));
+                               auto *save =
+                                   dialog->findChild<QPushButton *>(QStringLiteral("hostSaveButton"));
+                               save->click();
+                               QVERIFY(dialog->isVisible());
+                               QCOMPARE(window.m_state.hosts.front().name, QStringLiteral("测试机"));
+                               QCOMPARE(name->text(), QStringLiteral("更新后的家庭主机"));
+                               window.m_statePath = validPath;
+                               save->click();
+                           });
+        window.editHost(false);
+        QCOMPARE(window.m_state.hosts.size(), 1);
+        QCOMPARE(window.m_state.hosts.front().name, QStringLiteral("更新后的家庭主机"));
+        QCOMPARE(window.m_tabs->count(), 0);
+    }
+
+    void appearanceSaveFailureKeepsInput()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        window.m_preferencesPath = directory.path();
+        QTimer::singleShot(
+            50, &window,
+            [&]
+            {
+                auto *dialog = window.findChild<QDialog *>(QStringLiteral("appearanceDialog"));
+                QVERIFY(dialog);
+                auto *font = dialog->findChild<QSpinBox *>(QStringLiteral("terminalFontSize"));
+                font->setValue(24);
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+                QVERIFY(dialog->isVisible());
+                QCOMPARE(font->value(), 24);
+                QCOMPARE(window.m_terminalFontSize, 15);
+                QVERIFY(!dialog->findChild<QLabel *>(QStringLiteral("dialogError"))->text().isEmpty());
+                dialog->reject();
+            });
+        window.showAppearanceSettings();
+        QCOMPARE(window.m_terminalFontSize, 15);
+    }
+
     void appearanceCancelAndConfirm()
     {
         QTemporaryDir directory;
@@ -414,24 +609,27 @@ private slots:
         window.show();
         for (bool accept : {false, true})
         {
-            QTimer::singleShot(0, &window,
-                               [accept]
-                               {
-                                   for (auto *widget : QApplication::topLevelWidgets())
-                                       if (auto *dialog = qobject_cast<QDialog *>(widget))
-                                           if (dialog->objectName() == QStringLiteral("appearanceDialog"))
-                                           {
-                                               auto *font = dialog->findChild<QSpinBox *>(
-                                                   QStringLiteral("terminalFontSize"));
-                                               QVERIFY(font);
-                                               font->setValue(23);
-                                               const auto screenshot =
-                                                   qEnvironmentVariable("ORBIDEV_APPEARANCE_SCREENSHOT");
-                                               if (!screenshot.isEmpty())
-                                                   QVERIFY(dialog->grab().save(screenshot));
-                                               accept ? dialog->accept() : dialog->reject();
-                                           }
-                               });
+            QTimer::singleShot(
+                50, &window,
+                [accept]
+                {
+                    for (auto *widget : QApplication::topLevelWidgets())
+                        if (auto *dialog = qobject_cast<QDialog *>(widget))
+                            if (dialog->objectName() == QStringLiteral("appearanceDialog"))
+                            {
+                                auto *font =
+                                    dialog->findChild<QSpinBox *>(QStringLiteral("terminalFontSize"));
+                                QVERIFY(font);
+                                font->setValue(23);
+                                const auto screenshot =
+                                    qEnvironmentVariable("ORBIDEV_UI06_APPEARANCE_SCREENSHOT");
+                                if (!screenshot.isEmpty())
+                                    QVERIFY(dialog->grab().save(screenshot));
+                                dialog->findChild<QDialogButtonBox *>()
+                                    ->button(accept ? QDialogButtonBox::Save : QDialogButtonBox::Cancel)
+                                    ->click();
+                            }
+                });
             window.showAppearanceSettings();
             QCOMPARE(window.m_terminalFontSize, accept ? 23 : 15);
         }

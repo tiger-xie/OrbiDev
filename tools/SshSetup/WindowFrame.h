@@ -14,7 +14,7 @@ class WindowFrame final : public QWidget
 {
     Q_OBJECT
 public:
-    explicit WindowFrame(QWidget *target);
+    explicit WindowFrame(QWidget *target, bool dialog = false);
     ~WindowFrame() override;
 
     // 输入为窗口逻辑坐标；最大化、窗口外部和无效尺寸不允许调整大小。
@@ -32,6 +32,7 @@ private:
     bool isTitleArea(QWidget *widget) const;
 
     QPointer<QWidget> m_target;
+    bool m_dialog = false;
     QLabel *m_icon = nullptr;
     QLabel *m_title = nullptr;
     QToolButton *m_maximize = nullptr;

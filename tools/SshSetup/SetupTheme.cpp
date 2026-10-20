@@ -32,7 +32,7 @@ void applySetupTheme(QApplication &application)
     palette.setColor(QPalette::HighlightedText, Qt::white);
     application.setPalette(palette);
     QString style;
-    for (const auto *name : {"base", "window", "setup", "workbench"})
+    for (const auto *name : {"base", "window", "setup", "workbench", "dialog"})
     {
         QFile file(QStringLiteral(":/resources/style/%1.qss").arg(QString::fromLatin1(name)));
         if (!file.open(QIODevice::ReadOnly))

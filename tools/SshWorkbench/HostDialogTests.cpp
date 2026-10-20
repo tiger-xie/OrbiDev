@@ -3,6 +3,8 @@
 
 #include <QCheckBox>
 #include <QClipboard>
+#include <QDialogButtonBox>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
@@ -10,9 +12,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalSpy>
 #include <QSpinBox>
 #include <QTemporaryDir>
+#include <QToolButton>
 #include <QtTest>
 
 namespace sshworkbench
@@ -37,10 +42,93 @@ private:
     }
 
 private slots:
+    void longFieldsFitAndFooterRemainsVisible()
+    {
+        sshsetup::applySetupTheme(*qApp);
+        auto profile = sample();
+        profile.name = QStringLiteral("家庭开发电脑与长期项目验证环境");
+        profile.connection.identityFile = QStringLiteral("C:/Users/example/") +
+                                          QStringLiteral("very-long-folder/").repeated(12) +
+                                          QStringLiteral("identity");
+        HostDialog dialog(profile);
+        dialog.show();
+        QTest::qWait(100);
+        auto *scroll = dialog.findChild<QScrollArea *>(QStringLiteral("dialogScroll"));
+        auto *footer = dialog.findChild<QWidget *>(QStringLiteral("dialogFooter"));
+        QVERIFY(scroll && footer);
+        QVERIFY(dialog.m_fingerprintFields->isHidden());
+        QVERIFY(dialog.m_copyDiagnostic->isHidden());
+        QCOMPARE(scroll->verticalScrollBar()->maximum(), 0);
+        QVERIFY(scroll->viewport()->rect().contains(
+            QRect(dialog.m_feedback->mapTo(scroll->viewport(), QPoint()), dialog.m_feedback->size())));
+        QCOMPARE(dialog.m_feedback->text(), QStringLiteral("尚未测试连接。"));
+        const auto directory = qEnvironmentVariable("ORBIDEV_UI06_HOST_SCREENSHOT");
+        if (!directory.isEmpty())
+        {
+            QVERIFY(QDir().mkpath(directory));
+            QTest::qWait(100);
+            QVERIFY(dialog.grab().save(directory + QStringLiteral("/host.png")));
+        }
+        dialog.resize(480, 440);
+        QTest::qWait(100);
+        QCOMPARE(dialog.width(), 480);
+        QVERIFY(dialog.rect().contains(QRect(footer->mapTo(&dialog, QPoint()), footer->size())));
+        QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+        QVERIFY(scroll->verticalScrollBar()->maximum() > 0);
+        QVERIFY(dialog.m_buttons->button(QDialogButtonBox::Save)->isVisible());
+        if (!directory.isEmpty())
+        {
+            QVERIFY(dialog.grab().save(directory + QStringLiteral("/host-narrow.png")));
+            dialog.showFeedback(QStringLiteral("主机保存失败。请检查配置目录权限后重试。"), true);
+            QTest::qWait(100);
+            QVERIFY(dialog.grab().save(directory + QStringLiteral("/host-save-error.png")));
+        }
+    }
+    void saveFailureKeepsFieldsAndDialogOpen()
+    {
+        HostDialog dialog(sample());
+        int attempts = 0;
+        dialog.setSaveHandler(
+            [&attempts](const HostProfile &, QString &error)
+            {
+                ++attempts;
+                error = QStringLiteral("测试目录不可写，请选择其他位置。");
+                return attempts > 1;
+            });
+        dialog.show();
+        dialog.m_name->setText(QStringLiteral("保留修改"));
+        QSignalSpy accepted(&dialog, &QDialog::accepted);
+        dialog.accept();
+        QCOMPARE(attempts, 1);
+        QCOMPARE(accepted.count(), 0);
+        QVERIFY(dialog.isVisible());
+        QCOMPARE(dialog.m_name->text(), QStringLiteral("保留修改"));
+        QVERIFY(dialog.m_feedback->text().contains(QStringLiteral("不可写")));
+        dialog.accept();
+        QCOMPARE(attempts, 2);
+        QCOMPARE(accepted.count(), 1);
+    }
+    void invalidFieldsAndCancelDoNotSave()
+    {
+        HostDialog dialog(sample());
+        int attempts = 0;
+        dialog.setSaveHandler(
+            [&attempts](const HostProfile &, QString &)
+            {
+                ++attempts;
+                return true;
+            });
+        dialog.m_name->clear();
+        dialog.accept();
+        QCOMPARE(attempts, 0);
+        dialog.reject();
+        QCOMPARE(attempts, 0);
+    }
     void diagnosticCopyIsInvalidatedByTargetChanges()
     {
         HostDialog dialog(sample());
         QVERIFY(!dialog.m_copyDiagnostic->isEnabled());
+        QVERIFY(dialog.m_copyDiagnostic->isHidden());
         dialog.m_diagnosticReport = QStringLiteral("网络：失败\n后续：未执行");
         dialog.m_copyDiagnostic->setEnabled(true);
         // 系统剪贴板可能短暂被其他应用占用，重试真实按钮操作但不跳过失败。
@@ -58,6 +146,8 @@ private slots:
         dialog.m_host->setText(QStringLiteral("another.example"));
         QVERIFY(dialog.m_diagnosticReport.isEmpty());
         QVERIFY(!dialog.m_copyDiagnostic->isEnabled());
+        QVERIFY(dialog.m_copyDiagnostic->isHidden());
+        QCOMPARE(dialog.m_feedback->text(), QStringLiteral("连接信息已修改，请重新测试。"));
     }
     void fieldsPreserveStableIdentity()
     {
@@ -97,8 +187,13 @@ private slots:
     void changedFingerprintRequiresConfirmation()
     {
         HostDialog dialog(sample());
+        QVERIFY(!dialog.m_fingerprintToggle->isChecked());
         dialog.m_fingerprint->setText(fingerprint());
+        QVERIFY(dialog.m_fingerprintToggle->isChecked());
+        dialog.m_fingerprintToggle->setChecked(false);
         QVERIFY(!dialog.validateFields());
+        QVERIFY(dialog.m_fingerprintToggle->isChecked());
+        QVERIFY(!dialog.m_confirmed->isChecked());
         dialog.m_confirmed->setChecked(true);
         QVERIFY(dialog.validateFields());
         dialog.m_host->setText(QStringLiteral("other.example"));
@@ -110,6 +205,8 @@ private slots:
         auto profile = sample();
         profile.connection.hostFingerprint = fingerprint();
         HostDialog existing(profile);
+        QVERIFY(existing.m_fingerprintToggle->isChecked());
+        QVERIFY(!existing.m_confirmed->isChecked());
         QVERIFY(existing.validateFields());
         profile.id.clear();
         HostDialog added(profile);
@@ -131,6 +228,7 @@ private slots:
         const auto original = sample();
         HostDialog dialog(original);
         QVERIFY(dialog.importConnection(file.fileName()));
+        QVERIFY(dialog.m_fingerprintToggle->isChecked());
         QCOMPARE(dialog.host().id, original.id);
         QCOMPARE(dialog.host().connection.host, QStringLiteral("new.example"));
         QCOMPARE(dialog.host().connection.identityFile, original.connection.identityFile);

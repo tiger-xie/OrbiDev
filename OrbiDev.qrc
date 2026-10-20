@@ -3,9 +3,11 @@
     <file alias="style/base.qss">resources/style/base.qss</file>
     <file alias="style/setup.qss">resources/style/setup.qss</file>
     <file alias="style/workbench.qss">resources/style/workbench.qss</file>
+    <file alias="style/dialog.qss">resources/style/dialog.qss</file>
     <file alias="icon/common/app.svg">resources/icon/common/app.svg</file>
     <file alias="icon/common/check.svg">resources/icon/common/check.svg</file>
     <file alias="icon/common/chevron-down.svg">resources/icon/common/chevron-down.svg</file>
+    <file alias="icon/common/chevron-up.svg">resources/icon/common/chevron-up.svg</file>
     <file alias="style/window.qss">resources/style/window.qss</file>
     <file alias="icon/window/maximize.svg">resources/icon/window/maximize.svg</file>
     <file alias="icon/window/close.svg">resources/icon/window/close.svg</file>

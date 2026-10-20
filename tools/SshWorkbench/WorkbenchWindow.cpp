@@ -6,6 +6,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -30,6 +31,7 @@
 #include <QSaveFile>
 #include <QScopedValueRollback>
 #include <QScreen>
+#include <QScrollArea>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -239,13 +241,13 @@ void WorkbenchWindow::fitWindowToScreens(QRect restored)
     setGeometry(restored);
 }
 
-bool WorkbenchWindow::savePreferences()
+bool WorkbenchWindow::savePreferences(int fontSize)
 {
     if (m_preview)
         return true;
     if (!m_preferencesWritable)
     {
-        showFeedback(tr("外观仅在本次生效：原偏好文件无法读取，未覆盖该文件。"), true);
+        showFeedback(tr("外观偏好未保存：原偏好文件无法读取，未覆盖该文件。"), true);
         return false;
     }
     const QRect normal = isMaximized() || isMinimized() ? normalGeometry() : geometry();
@@ -253,7 +255,7 @@ bool WorkbenchWindow::savePreferences()
     for (auto entry = m_recentProjects.cbegin(); entry != m_recentProjects.cend(); ++entry)
         recent.insert(entry.key(), entry.value());
     const QJsonObject settings{{QStringLiteral("version"), 1},
-                               {QStringLiteral("fontSize"), m_terminalFontSize},
+                               {QStringLiteral("fontSize"), fontSize < 0 ? m_terminalFontSize : fontSize},
                                {QStringLiteral("railWidth"), qBound(230, m_splitter->sizes().front(), 32768)},
                                {QStringLiteral("x"), normal.x()},
                                {QStringLiteral("y"), normal.y()},
@@ -285,35 +287,74 @@ void WorkbenchWindow::showAppearanceSettings()
         return;
     QDialog dialog(this);
     dialog.setObjectName(QStringLiteral("appearanceDialog"));
+    dialog.setProperty("workbenchDialog", true);
     dialog.setWindowTitle(tr("工作台外观"));
-    dialog.setMinimumWidth(430);
+    dialog.resize(520, 340);
     auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    layout->addWidget(new sshsetup::WindowFrame(&dialog, true));
+    auto *body = new QWidget(&dialog);
+    body->setObjectName(QStringLiteral("dialogBody"));
+    auto *content = new QVBoxLayout(body);
+    content->setContentsMargins(28, 24, 28, 24);
+    content->setSpacing(20);
+    auto *description = new QLabel(tr("调整全部终端的显示字号。"), body);
+    description->setObjectName(QStringLiteral("dialogDescription"));
+    content->addWidget(description);
     auto *form = new QFormLayout;
-    form->addRow(tr("主题"), new QLabel(tr("石墨灰／青绿（深色）"), &dialog));
-    auto *fontSize = new QSpinBox(&dialog);
+    form->setHorizontalSpacing(24);
+    form->setVerticalSpacing(18);
+    form->addRow(tr("主题"), new QLabel(tr("石墨灰／青绿（深色）"), body));
+    auto *fontSize = new QSpinBox(body);
     fontSize->setObjectName(QStringLiteral("terminalFontSize"));
     fontSize->setRange(10, 30);
+    fontSize->setMinimumHeight(fontSize->fontMetrics().height() + 18);
     fontSize->setValue(m_terminalFontSize);
     form->addRow(tr("终端字号"), fontSize);
-    layout->addLayout(form);
-    auto *hint = new QLabel(tr("应用于所有已有和新建终端。\nCtrl+- / Ctrl+= 也会调整并保存全局字号。\n复制 "
+    content->addLayout(form);
+    auto *hint = new QLabel(tr("保存后应用于已有和新建终端。\nCtrl+- / Ctrl+= 调整字号；复制 "
                                "Ctrl+Shift+C；粘贴 Ctrl+V / Ctrl+Shift+V。"),
-                            &dialog);
+                            body);
+    hint->setObjectName(QStringLiteral("dialogHint"));
     hint->setWordWrap(true);
-    layout->addWidget(hint);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    buttons->button(QDialogButtonBox::Ok)->setText(tr("保存"));
+    content->addWidget(hint);
+    auto *errorLabel = new QLabel(body);
+    errorLabel->setObjectName(QStringLiteral("dialogError"));
+    errorLabel->setWordWrap(true);
+    errorLabel->setTextFormat(Qt::PlainText);
+    errorLabel->hide();
+    content->addWidget(errorLabel);
+    layout->addWidget(body);
+    auto *footer = new QWidget(&dialog);
+    footer->setObjectName(QStringLiteral("dialogFooter"));
+    auto *footerLayout = new QHBoxLayout(footer);
+    footerLayout->setContentsMargins(28, 16, 28, 20);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, footer);
+    buttons->button(QDialogButtonBox::Save)->setText(tr("保存"));
+    auto *saveButton = buttons->button(QDialogButtonBox::Save);
+    saveButton->setProperty("role", "primary");
+    saveButton->style()->unpolish(saveButton);
+    saveButton->style()->polish(saveButton);
     buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    footerLayout->addWidget(buttons);
+    layout->addWidget(footer);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog,
+            [&, this]
+            {
+                if (!savePreferences(fontSize->value()))
+                {
+                    errorLabel->setText(m_feedback->text());
+                    errorLabel->show();
+                    return;
+                }
+                setTerminalFontSize(fontSize->value());
+                showFeedback(tr("外观偏好已保存，字号已应用于全部终端。"));
+                dialog.accept();
+            });
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    layout->addWidget(buttons);
     fontSize->setFocus();
-    if (dialog.exec() == QDialog::Accepted)
-    {
-        setTerminalFontSize(fontSize->value());
-        if (savePreferences())
-            showFeedback(tr("外观偏好已保存，字号已应用于全部终端。"));
-    }
+    dialog.exec();
 }
 
 void WorkbenchWindow::buildUi()
@@ -682,17 +723,23 @@ void WorkbenchWindow::editHost(bool add)
         host = *current;
     HostDialog dialog(host, this);
     dialog.setWindowTitle(add ? tr("添加家庭主机") : tr("编辑家庭主机"));
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-    auto next = m_state;
-    if (add)
-        next.hosts.append(dialog.host());
-    else
-        for (auto &entry : next.hosts)
-            if (entry.id == host.id)
-                entry = dialog.host();
-    next.currentHostId = host.id;
-    if (saveState(next))
+    dialog.setSaveHandler(
+        [this, add, host](const HostProfile &updated, QString &error)
+        {
+            auto next = m_state;
+            if (add)
+                next.hosts.append(updated);
+            else
+                for (auto &entry : next.hosts)
+                    if (entry.id == host.id)
+                        entry = updated;
+            next.currentHostId = host.id;
+            if (saveState(next))
+                return true;
+            error = m_feedback->text();
+            return false;
+        });
+    if (dialog.exec() == QDialog::Accepted)
     {
         renderHosts();
         reloadProfile();
@@ -876,36 +923,90 @@ void WorkbenchWindow::editProject(bool add)
     if (!add && row < 0)
         return;
     QDialog dialog(this);
-    dialog.setWindowTitle(add ? tr("添加项目") : tr("编辑项目"));
-    dialog.resize(560, 220);
-    auto *layout = new QFormLayout(&dialog);
-    auto *name = new QLineEdit(&dialog);
+    dialog.setObjectName(QStringLiteral("workbenchDialog"));
+    dialog.setWindowTitle(add ? tr("新建项目") : tr("编辑项目"));
+    dialog.resize(600, 520);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    layout->addWidget(new sshsetup::WindowFrame(&dialog, true));
+    auto *scroll = new QScrollArea(&dialog);
+    scroll->setObjectName(QStringLiteral("dialogScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto *body = new QWidget(scroll);
+    body->setObjectName(QStringLiteral("dialogBody"));
+    auto *content = new QVBoxLayout(body);
+    content->setContentsMargins(28, 24, 28, 24);
+    content->setSpacing(20);
+    auto *form = new QFormLayout;
+    form->setHorizontalSpacing(24);
+    form->setVerticalSpacing(18);
+    auto *name = new QLineEdit(body);
+    name->setObjectName(QStringLiteral("projectName"));
     name->setMaxLength(80);
-    auto *directory = new QLineEdit(&dialog);
-    directory->setPlaceholderText(tr("D:\\Projects\\项目名称；留空使用家庭用户目录"));
+    auto *directory = new QLineEdit(body);
+    directory->setObjectName(QStringLiteral("projectDirectory"));
+    directory->setPlaceholderText(tr("D:\\Projects\\项目名称"));
     directory->setMaxLength(1024);
     if (!add)
     {
         name->setText(m_state.projects.projects[row].name);
         directory->setText(m_state.projects.projects[row].directory);
     }
-    layout->addRow(tr("项目名称"), name);
-    layout->addRow(tr("远程目录"), directory);
-    auto *hostChoice = new QComboBox(&dialog);
+    form->addRow(tr("项目名称"), name);
+    auto *hostChoice = new QComboBox(body);
     hostChoice->setObjectName(QStringLiteral("projectHostChoice"));
+    hostChoice->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    hostChoice->setMinimumContentsLength(16);
     for (const auto &host : m_state.hosts)
         hostChoice->addItem(host.name, host.id);
     hostChoice->setCurrentIndex(hostChoice->findData(
         add ? m_state.currentHostId : m_state.projectHosts.value(m_state.projects.projects[row].id)));
-    layout->addRow(tr("所属主机"), hostChoice);
-    auto *errorLabel = new QLabel(&dialog);
+    form->addRow(tr("家庭主机"), hostChoice);
+    form->addRow(tr("远程目录"), directory);
+    auto *directoryHint = new QLabel(tr("请输入家庭电脑上的目录，留空使用用户主目录。"), body);
+    directoryHint->setObjectName(QStringLiteral("dialogDescription"));
+    directoryHint->setWordWrap(true);
+    directoryHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    form->addRow(QString(), directoryHint);
+    QCheckBox *openAfterSave = nullptr;
+    if (add)
+    {
+        openAfterSave = new QCheckBox(tr("保存后打开终端"), body);
+        openAfterSave->setObjectName(QStringLiteral("openAfterSave"));
+        form->addRow(QString(), openAfterSave);
+    }
+    content->addLayout(form);
+    auto *hint = new QLabel(add ? tr("目录不存在时会停止启动，不会切换到其他目录。")
+                                : tr("目录不存在时会停止启动。已有终端继续使用创建时的主机和目录。"),
+                            body);
+    hint->setObjectName(QStringLiteral("dialogHint"));
+    hint->setWordWrap(true);
+    content->addWidget(hint);
+    auto *errorLabel = new QLabel(body);
+    errorLabel->setObjectName(QStringLiteral("dialogError"));
     errorLabel->setWordWrap(true);
     errorLabel->setTextFormat(Qt::PlainText);
-    layout->addRow(errorLabel);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
-    buttons->button(QDialogButtonBox::Save)->setText(tr("保存"));
+    errorLabel->hide();
+    content->addWidget(errorLabel);
+    scroll->setWidget(body);
+    layout->addWidget(scroll, 1);
+    auto *footer = new QWidget(&dialog);
+    footer->setObjectName(QStringLiteral("dialogFooter"));
+    auto *footerLayout = new QHBoxLayout(footer);
+    footerLayout->setContentsMargins(28, 16, 28, 20);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, footer);
+    buttons->button(QDialogButtonBox::Save)->setText(add ? tr("创建项目") : tr("保存项目"));
+    auto *saveButton = buttons->button(QDialogButtonBox::Save);
+    saveButton->setProperty("role", "primary");
+    saveButton->style()->unpolish(saveButton);
+    saveButton->style()->polish(saveButton);
     buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
-    layout->addRow(buttons);
+    footerLayout->addWidget(buttons);
+    layout->addWidget(footer);
+    launcher::Project savedProject;
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog,
             [&, this]
@@ -927,18 +1028,30 @@ void WorkbenchWindow::editProject(bool add)
                 if (!launcher::validateConfiguration(next, error))
                 {
                     errorLabel->setText(error);
+                    errorLabel->show();
                     return;
                 }
                 auto state = m_state;
                 state.projects = next;
                 state.projectHosts.insert(project.id, hostChoice->currentData().toString());
                 if (saveState(state))
+                {
+                    savedProject = project;
                     dialog.accept();
+                }
                 else
+                {
                     errorLabel->setText(m_feedback->text());
+                    errorLabel->show();
+                }
             });
+    name->setFocus();
     if (dialog.exec() == QDialog::Accepted)
+    {
         renderProjects();
+        if (openAfterSave && openAfterSave->isChecked())
+            openProject(savedProject);
+    }
 }
 
 void WorkbenchWindow::removeProject()

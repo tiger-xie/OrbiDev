@@ -1,0 +1,27 @@
+/* 弹窗沿用石墨色表面；正文可滚动，操作栏由布局固定在底部。 */
+QDialog#workbenchDialog, QDialog[workbenchDialog="true"] {
+    background: #1d2730; border: 1px solid #465560;
+}
+QWidget#dialogBody { background: #1d2730; }
+QWidget#dialogFooter { background: #1b252d; border-top: 1px solid #34424e; }
+QLabel#dialogHeading { font-size: 15px; font-weight: 600; color: #edf2f6; }
+QLabel#dialogDescription, QLabel#dialogHint { color: #a8b5c0; }
+QLabel#dialogHint { padding-top: 4px; padding-bottom: 4px; }
+QDialog#workbenchDialog QDialogButtonBox QPushButton,
+QDialog[workbenchDialog="true"] QDialogButtonBox QPushButton {
+    min-width: 88px; padding: 10px 20px;
+}
+QMessageBox { background: #1d2730; }
+QMessageBox QLabel { color: #edf2f6; }
+QMessageBox QPushButton { min-width: 72px; }
+QLabel#dialogError { color: #ff8f98; background: #38252b; border: 1px solid #78424b; border-radius: 4px; padding: 10px; }
+/* 数字编辑器的内部输入框不重复使用公共输入框内边距。 */
+QDialog QSpinBox QLineEdit { border: none; padding: 0; background: transparent; }
+QDialog QSpinBox { min-height: 20px; padding-right: 28px; }
+QDialog QSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 26px; border: none; }
+QDialog QSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 26px; border: none; }
+QDialog QSpinBox::up-arrow { image: url(:/resources/icon/common/chevron-up.svg); width: 12px; height: 12px; }
+QDialog QSpinBox::down-arrow { image: url(:/resources/icon/common/chevron-down.svg); width: 12px; height: 12px; }/* 主机指纹是可展开的次级配置，保留文字入口与键盘焦点。 */
+QToolButton#hostFingerprintToggle { background: transparent; color: #a8b5c0; border: 1px solid transparent; border-radius: 4px; padding: 6px; }
+QToolButton#hostFingerprintToggle:hover { background: #273943; color: #edf2f6; }
+QToolButton#hostFingerprintToggle:focus { border-color: #83f0ea; }

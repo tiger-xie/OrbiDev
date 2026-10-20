@@ -33,6 +33,27 @@ class WindowFrameTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void dialogFrameOnlyClosesAndDoesNotMaximize()
+    {
+        CloseGuardWindow window;
+        auto *layout = new QVBoxLayout(&window);
+        auto *frame = new sshsetup::WindowFrame(&window, true);
+        layout->addWidget(frame);
+        window.resize(600, 400);
+        window.show();
+        QVERIFY(!frame->findChild<QToolButton *>(QStringLiteral("frameMinimize")));
+        QVERIFY(!frame->findChild<QToolButton *>(QStringLiteral("frameMaximize")));
+        QTest::mouseDClick(frame, Qt::LeftButton, Qt::NoModifier, QPoint(100, 20));
+        QVERIFY(!window.isMaximized());
+        auto *close = frame->findChild<QToolButton *>(QStringLiteral("frameClose"));
+        QVERIFY(close);
+        close->click();
+        QCOMPARE(window.closeRequests, 1);
+        QVERIFY(window.isVisible());
+        window.allowClose = true;
+        close->click();
+        QVERIFY(!window.isVisible());
+    }
     void nativeDragAndResize()
     {
         if (!qEnvironmentVariableIsSet("ORBIDEV_NATIVE_FRAME_TESTS"))
