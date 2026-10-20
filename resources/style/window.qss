@@ -1,0 +1,12 @@
+/* 标题栏仅负责视觉，系统移动和缩放由窗口组件调用。 */
+QWidget#windowFrame { background: #182129; border-bottom: 1px solid #34424e; }
+QLabel#frameTitle { color: #edf2f6; background: transparent; }
+QToolButton#frameMinimize, QToolButton#frameMaximize, QToolButton#frameClose {
+    background: transparent; border: 1px solid transparent; border-radius: 0; padding: 0;
+}
+QToolButton#frameMinimize:hover, QToolButton#frameMaximize:hover { background: #31414c; }
+QToolButton#frameMinimize:pressed, QToolButton#frameMaximize:pressed { background: #405563; }
+QToolButton#frameClose:hover { background: #c42b3a; }
+QToolButton#frameClose:pressed { background: #9c2230; }
+QToolButton#frameMinimize:focus, QToolButton#frameMaximize:focus, QToolButton#frameClose:focus { border-color: #83f0ea; }
+QToolButton#frameMinimize:disabled, QToolButton#frameMaximize:disabled { background: #222d35; }

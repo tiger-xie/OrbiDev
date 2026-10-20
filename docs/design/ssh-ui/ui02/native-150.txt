@@ -1,0 +1,8 @@
+********* Start testing of WindowFrameTests *********
+Config: Using QtTest library 5.15.2, Qt 5.15.2 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2019), windows 10
+PASS   : WindowFrameTests::initTestCase()
+SKIP   : WindowFrameTests::nativeDragAndResize() 测试窗口未获得前台，不发送系统鼠标输入。
+E:\Codex\Project\OrbiDev\tools\SshSetup\WindowFrameTests.cpp(52) : failure location
+PASS   : WindowFrameTests::cleanupTestCase()
+Totals: 2 passed, 0 failed, 1 skipped, 0 blacklisted, 376ms
+********* Finished testing of WindowFrameTests *********

@@ -23,7 +23,7 @@ private slots:
 
     void sharedThemeResourcesAreAvailable()
     {
-        for (const auto *name : {"base", "setup", "workbench"})
+        for (const auto *name : {"base", "window", "setup", "workbench"})
         {
             QFile file(QStringLiteral(":/resources/style/%1.qss").arg(QString::fromLatin1(name)));
             QVERIFY(file.open(QIODevice::ReadOnly));

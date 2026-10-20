@@ -1,0 +1,33 @@
+Internal ctest changing into directory: E:/Codex/Project/OrbiDev/build-ssh-workbench
+Test project E:/Codex/Project/OrbiDev/build-ssh-workbench
+      Start  1: workbench.SshSession
+ 1/11 Test  #1: workbench.SshSession .............***Failed   90.92 sec
+
+      Start  2: workbench.WorkbenchWindow
+ 2/11 Test  #2: workbench.WorkbenchWindow ........   Passed   49.16 sec
+      Start  3: workbench.ProjectConfiguration
+ 3/11 Test  #3: workbench.ProjectConfiguration ...   Passed    0.24 sec
+      Start  4: workbench.WorkbenchStore
+ 4/11 Test  #4: workbench.WorkbenchStore .........   Passed    0.23 sec
+      Start  5: workbench.HostDialog
+ 5/11 Test  #5: workbench.HostDialog .............   Passed    1.38 sec
+      Start  6: workbench.terminal
+ 6/11 Test  #6: workbench.terminal ...............   Passed   47.73 sec
+      Start  7: setup.IdentityService
+ 7/11 Test  #7: setup.IdentityService ............   Passed    7.82 sec
+      Start  8: setup.AuthorizationService
+ 8/11 Test  #8: setup.AuthorizationService .......   Passed    1.08 sec
+      Start  9: setup.EnvironmentService
+ 9/11 Test  #9: setup.EnvironmentService .........   Passed    1.31 sec
+      Start 10: setup.windowFrame
+10/11 Test #10: setup.windowFrame ................   Passed   17.79 sec
+      Start 11: setup.ui
+11/11 Test #11: setup.ui .........................   Passed    2.92 sec
+
+91% tests passed, 1 tests failed out of 11
+
+Total Test time (real) = 223.31 sec
+
+The following tests FAILED:
+	  1 - workbench.SshSession (Failed)
+Errors while running CTest

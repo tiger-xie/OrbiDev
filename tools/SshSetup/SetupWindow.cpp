@@ -1,4 +1,5 @@
 #include "SetupWindow.h"
+#include "WindowFrame.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -106,6 +107,7 @@ void SetupWindow::buildUi()
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
+    root->addWidget(new WindowFrame(this));
     auto *body = new QHBoxLayout;
     body->setSpacing(0);
     auto *rail = new QWidget(this);

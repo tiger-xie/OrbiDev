@@ -6,5 +6,10 @@
     <file alias="icon/common/app.svg">resources/icon/common/app.svg</file>
     <file alias="icon/common/check.svg">resources/icon/common/check.svg</file>
     <file alias="icon/common/chevron-down.svg">resources/icon/common/chevron-down.svg</file>
+    <file alias="style/window.qss">resources/style/window.qss</file>
+    <file alias="icon/window/maximize.svg">resources/icon/window/maximize.svg</file>
+    <file alias="icon/window/close.svg">resources/icon/window/close.svg</file>
+    <file alias="icon/window/minimize.svg">resources/icon/window/minimize.svg</file>
+    <file alias="icon/window/restore.svg">resources/icon/window/restore.svg</file>
   </qresource>
 </RCC>

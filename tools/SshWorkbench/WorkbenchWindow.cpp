@@ -1,6 +1,7 @@
 #include "WorkbenchWindow.h"
 #include "HostDialog.h"
 #include "SshSession.h"
+#include "WindowFrame.h"
 #include "terminal/TerminalView.h"
 
 #include <QAction>
@@ -231,6 +232,7 @@ void WorkbenchWindow::showAppearanceSettings()
 
 void WorkbenchWindow::buildUi()
 {
+    setMenuWidget(new sshsetup::WindowFrame(this));
     auto *central = new QWidget(this);
     central->setObjectName(QStringLiteral("workbench"));
     auto *root = new QVBoxLayout(central);
