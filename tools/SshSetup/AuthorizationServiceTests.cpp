@@ -28,6 +28,65 @@ class AuthorizationServiceTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void explainsFingerprintInsteadOfPublicKey()
+    {
+        QString normalized, fingerprint, error;
+        for (const QString &input :
+             {QStringLiteral("SHA256:abc123"), QStringLiteral("256 SHA256:abc123 device (ED25519)")})
+        {
+            QVERIFY(!sshsetup::validatePublicKey(input, normalized, fingerprint, error));
+            QVERIFY(error.contains(QStringLiteral("指纹")));
+            QVERIFY(error.contains(QStringLiteral(".pub")));
+            QVERIFY(error.contains(QStringLiteral("复制公钥")));
+            QVERIFY(normalized.isEmpty());
+            QVERIFY(fingerprint.isEmpty());
+        }
+    }
+    void warnsOnlyForExplicitLoopbackConfiguration()
+    {
+        for (const QString &configuration :
+             {QStringLiteral("ListenAddress 127.0.0.1\n"),
+              QStringLiteral("ListenAddress ::1\nListenAddress 127.0.0.2:2222\n"),
+              QStringLiteral("ListenAddress [::1]:22 # local\n")})
+        {
+            const QString warning = sshsetup::sshListenConfigurationWarning(configuration);
+            QVERIFY(warning.contains(QStringLiteral("仅配置了回环")));
+            QVERIFY(warning.contains(QStringLiteral("实际监听")));
+        }
+        for (const QString &configuration :
+             {QStringLiteral("#ListenAddress 127.0.0.1\n"), QStringLiteral("ListenAddress 0.0.0.0\n"),
+              QStringLiteral("ListenAddress 127.0.0.1\nListenAddress 100.64.0.1\n"),
+              QStringLiteral("ListenAddress ::\n"), QStringLiteral("ListenAddress 127.999.0.1\n")})
+            QVERIFY(!sshsetup::sshListenConfigurationWarning(configuration)
+                         .contains(QStringLiteral("仅配置了回环")));
+        QVERIFY(
+            sshsetup::sshListenConfigurationWarning(QStringLiteral("ListenAddress 127.0.0.1\nInclude custom"))
+                .contains(QStringLiteral("无法")));
+    }
+    void redactsHomeEnvironmentReport()
+    {
+        sshsetup::HomeEnvironment environment;
+        environment.hostName = QStringLiteral("private-host");
+        environment.userName = QStringLiteral("private-user");
+        environment.host = QStringLiteral("100.64.0.99");
+        environment.serviceExecutable = QStringLiteral("C:/private-install/sshd.exe");
+        environment.authorizedKeysPath = QStringLiteral("C:/private-keys/authorized_keys");
+        environment.error = QStringLiteral("secret-error-with-path");
+        environment.listenWarning = QStringLiteral("secret-warning");
+        QString report = sshsetup::homeEnvironmentReport(environment);
+        QVERIFY(report.contains(QStringLiteral("未检测到安装")));
+        environment.serviceInstalled = true;
+        environment.serviceState = QStringLiteral("未运行");
+        report = sshsetup::homeEnvironmentReport(environment);
+        QVERIFY(report.contains(QStringLiteral("未运行")));
+        environment.sshAvailable = true;
+        report = sshsetup::homeEnvironmentReport(environment);
+        QVERIFY(report.contains(QStringLiteral("运行中")));
+        for (const QString &secret :
+             {environment.hostName, environment.userName, environment.host, environment.serviceExecutable,
+              environment.authorizedKeysPath, environment.error, environment.listenWarning})
+            QVERIFY(!report.contains(secret));
+    }
     void distinguishesLockedConfiguration()
     {
         QTemporaryDir directory;
@@ -124,6 +183,12 @@ private slots:
         QVERIFY(!sshsetup::matchesAuthorizationPreview(expected, changed, error));
         changed = expected;
         changed.sshAvailable = false;
+        QVERIFY(!sshsetup::matchesAuthorizationPreview(expected, changed, error));
+        changed = expected;
+        changed.serviceExecutable = QStringLiteral("C:/other/sshd.exe");
+        QVERIFY(!sshsetup::matchesAuthorizationPreview(expected, changed, error));
+        changed = expected;
+        changed.hostName = QStringLiteral("another-host");
         QVERIFY(!sshsetup::matchesAuthorizationPreview(expected, changed, error));
     }
     void validatesPublicKey()

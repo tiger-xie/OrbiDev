@@ -12,6 +12,57 @@ class EnvironmentServiceTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void probeDiagnosticsAreSpecificAndRedacted()
+    {
+        struct Case
+        {
+            QByteArray output;
+            bool success;
+            bool timeout;
+            ConnectionIssue issue;
+        };
+        const Case cases[] = {
+            {"Host key verification failed.", false, false, ConnectionIssue::UnknownHost},
+            {"REMOTE HOST IDENTIFICATION HAS CHANGED!", false, false, ConnectionIssue::HostKeyChanged},
+            {"user@host: Permission denied (publickey).", false, false,
+             ConnectionIssue::AuthenticationFailed},
+            {"Load key C:/secret: Permission denied", false, false, ConnectionIssue::ProbeFailed},
+            {"", false, true, ConnectionIssue::ProbeTimeout},
+            {"Authenticated to private-host\npowershell.exe missing", false, false,
+             ConnectionIssue::PowerShellUnavailable},
+            {"ORBIDEV_AUTH_OK", true, false, ConnectionIssue::ClaudeUnavailable},
+            {"ORBIDEV_AUTH_OK\nORBIDEV_CLAUDE_OK", true, false, ConnectionIssue::None}};
+        for (const auto &item : cases)
+        {
+            auto result = classifySshProbeResult(item.output, item.success, item.timeout);
+            QCOMPARE(result.issue, item.issue);
+            result.details = QStringLiteral("private-key-path SECRET");
+            const QString report = formatConnectionReport(result);
+            QVERIFY(!report.contains(QStringLiteral("SECRET")));
+            QVERIFY(!report.contains(QStringLiteral("private-host")));
+            QVERIFY(!report.contains(QStringLiteral("C:/secret")));
+        }
+        const auto denied = classifySshProbeResult("Permission denied (publickey).", false, false);
+        QCOMPARE(denied.authenticationStatus, CheckStatus::Failed);
+        QCOMPARE(denied.claudeStatus, CheckStatus::NotRun);
+        QVERIFY(!denied.authenticated);
+        const auto passed = classifySshProbeResult("ORBIDEV_AUTH_OK\nORBIDEV_CLAUDE_OK", true, false);
+        QVERIFY(passed.authenticated && passed.claudeAvailable);
+        QCOMPARE(passed.powershellStatus, CheckStatus::Passed);
+        const auto timeout = classifySshProbeResult("Authenticated to test", false, true);
+        QVERIFY(timeout.authenticated);
+        QCOMPARE(timeout.powershellStatus, CheckStatus::Inconclusive);
+        QCOMPARE(timeout.claudeStatus, CheckStatus::NotRun);
+    }
+    void invalidProfileDoesNotClaimNetworkFailure()
+    {
+        ConnectionProfile profile;
+        profile.host = QStringLiteral("-invalid");
+        const auto result = testConnection(profile);
+        QCOMPARE(result.issue, ConnectionIssue::InvalidProfile);
+        QCOMPARE(result.networkStatus, CheckStatus::NotRun);
+        QVERIFY(formatConnectionReport(result).contains(QStringLiteral("未执行")));
+    }
     void optionalLiveConnection()
     {
         const QString path = qEnvironmentVariable("ORBIDEV_LIVE_SETUP_CONFIG");

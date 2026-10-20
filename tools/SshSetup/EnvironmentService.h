@@ -1,4 +1,5 @@
 #pragma once
+#include <QByteArray>
 #include <QString>
 #include <QStringList>
 
@@ -18,6 +19,30 @@ struct EnvironmentStatus
     bool tailscaleOnline = false;
     QString details;
 };
+enum class CheckStatus
+{
+    NotRun,
+    Passed,
+    Failed,
+    Inconclusive
+};
+enum class ConnectionIssue
+{
+    None,
+    InvalidProfile,
+    ClientUnavailable,
+    NetworkUnavailable,
+    BannerTimeout,
+    BannerClosed,
+    TrustPreparationFailed,
+    UnknownHost,
+    HostKeyChanged,
+    AuthenticationFailed,
+    ProbeTimeout,
+    PowerShellUnavailable,
+    ClaudeUnavailable,
+    ProbeFailed
+};
 struct ConnectionResult
 {
     bool networkReachable = false;
@@ -25,7 +50,18 @@ struct ConnectionResult
     bool authenticated = false;
     bool claudeAvailable = false;
     QString details;
+    CheckStatus networkStatus = CheckStatus::NotRun;
+    CheckStatus sshStatus = CheckStatus::NotRun;
+    CheckStatus trustStatus = CheckStatus::NotRun;
+    CheckStatus authenticationStatus = CheckStatus::NotRun;
+    CheckStatus powershellStatus = CheckStatus::NotRun;
+    CheckStatus claudeStatus = CheckStatus::NotRun;
+    ConnectionIssue issue = ConnectionIssue::None;
 };
+// 纯函数，仅根据固定标记分类，不在结果中保留原始输出；调用方提供进程结束与超时状态。
+ConnectionResult classifySshProbeResult(const QByteArray &output, bool success, bool timedOut);
+// 统一显示与复制的脱敏报告，仅包含枚举对应的固定文案，忽略自由文本 details。
+QString formatConnectionReport(const ConnectionResult &result);
 // 以下操作同步且有超时，界面须在工作线程调用；不会接受未知主机或修改全局 SSH 配置。
 EnvironmentStatus inspectClientEnvironment();
 // 同步准备严格校验主机的参数；信任目录由调用方创建并保持到 SSH 进程退出。

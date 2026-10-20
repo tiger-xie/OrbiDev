@@ -7,6 +7,7 @@ class QCheckBox;
 class QDialogButtonBox;
 class QLabel;
 class QLineEdit;
+class QPushButton;
 class QSpinBox;
 
 namespace sshworkbench
@@ -32,6 +33,8 @@ private:
 
     HostProfile m_original;
     bool m_busy = false;
+    QString m_diagnosticReport;
+    QPushButton *m_copyDiagnostic = nullptr;
     QWidget *m_fields = nullptr;
     QLineEdit *m_name = nullptr;
     QLineEdit *m_host = nullptr;

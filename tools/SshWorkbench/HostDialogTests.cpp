@@ -2,11 +2,14 @@
 #include "SetupTheme.h"
 
 #include <QCheckBox>
+#include <QClipboard>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QSpinBox>
 #include <QTemporaryDir>
@@ -34,6 +37,28 @@ private:
     }
 
 private slots:
+    void diagnosticCopyIsInvalidatedByTargetChanges()
+    {
+        HostDialog dialog(sample());
+        QVERIFY(!dialog.m_copyDiagnostic->isEnabled());
+        dialog.m_diagnosticReport = QStringLiteral("网络：失败\n后续：未执行");
+        dialog.m_copyDiagnostic->setEnabled(true);
+        // 系统剪贴板可能短暂被其他应用占用，重试真实按钮操作但不跳过失败。
+        QElapsedTimer deadline;
+        deadline.start();
+        bool copied = false;
+        do
+        {
+            dialog.m_copyDiagnostic->click();
+            copied = QApplication::clipboard()->text() == dialog.m_diagnosticReport;
+            if (!copied)
+                QTest::qWait(100);
+        } while (!copied && deadline.elapsed() < 5000);
+        QVERIFY2(copied, "系统剪贴板不可用，未验证复制诊断。");
+        dialog.m_host->setText(QStringLiteral("another.example"));
+        QVERIFY(dialog.m_diagnosticReport.isEmpty());
+        QVERIFY(!dialog.m_copyDiagnostic->isEnabled());
+    }
     void fieldsPreserveStableIdentity()
     {
         const auto original = sample();

@@ -1,6 +1,8 @@
 #include "HostDialog.h"
 
+#include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -80,6 +82,12 @@ HostDialog::HostDialog(const HostProfile &host, QWidget *parent) : QDialog(paren
     test->setObjectName(QStringLiteral("hostTestButton"));
     actions->addWidget(import);
     actions->addWidget(test);
+    m_copyDiagnostic = new QPushButton(tr("复制脱敏诊断"), m_fields);
+    m_copyDiagnostic->setObjectName(QStringLiteral("hostCopyDiagnosticButton"));
+    m_copyDiagnostic->setEnabled(false);
+    actions->addWidget(m_copyDiagnostic);
+    connect(m_copyDiagnostic, &QPushButton::clicked, this,
+            [this] { QApplication::clipboard()->setText(m_diagnosticReport); });
     actions->addStretch();
     content->addLayout(actions);
     connect(import, &QPushButton::clicked, this,
@@ -165,6 +173,8 @@ void HostDialog::done(int result)
 
 void HostDialog::invalidateResult()
 {
+    m_diagnosticReport.clear();
+    m_copyDiagnostic->setEnabled(false);
     m_confirmed->setChecked(false);
     showFeedback(
         tr("连接信息已修改，请重新测试。\n网络：未测试　SSH 服务：未测试\n密钥认证：未测试　Claude：未测试"));
@@ -195,6 +205,8 @@ void HostDialog::checkConnection()
     const auto profile = host().connection;
     auto result = std::make_shared<sshsetup::ConnectionResult>();
     m_busy = true;
+    m_diagnosticReport.clear();
+    m_copyDiagnostic->setEnabled(false);
     m_fields->setEnabled(false);
     m_buttons->setEnabled(false);
     showFeedback(tr("正在检查网络、SSH 服务、密钥认证与 Claude，请稍候…"));
@@ -207,13 +219,9 @@ void HostDialog::checkConnection()
                 m_busy = false;
                 m_fields->setEnabled(true);
                 m_buttons->setEnabled(true);
-                const auto state = [this](bool passed)
-                { return passed ? tr("通过") : tr("未通过 / 未完成"); };
-                showFeedback(tr("网络：%1　SSH 服务：%2\n密钥认证：%3　Claude：%4\n%5")
-                                 .arg(state(result->networkReachable), state(result->sshReachable),
-                                      state(result->authenticated), state(result->claudeAvailable),
-                                      result->details),
-                             !result->claudeAvailable);
+                m_diagnosticReport = sshsetup::formatConnectionReport(*result);
+                m_copyDiagnostic->setEnabled(true);
+                showFeedback(m_diagnosticReport, !result->claudeAvailable);
             });
     thread->start();
 }

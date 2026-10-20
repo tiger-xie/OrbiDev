@@ -70,6 +70,8 @@ private:
     QString m_legacyConfigPath;
     QString m_normalizedKey;
     QString m_importFingerprint;
+    QString m_environmentReport;
+    QString m_connectionReport;
     Identity m_identity;
     HomeEnvironment m_homeEnvironment;
     ConnectionProfile m_profile;
@@ -86,6 +88,8 @@ private:
     QPushButton *m_back = nullptr;
     QPushButton *m_next = nullptr;
     QPlainTextEdit *m_publicInput = nullptr;
+    QPlainTextEdit *m_publicKeyPreview = nullptr;
+    QPushButton *m_copyConnectionReport = nullptr;
     QLineEdit *m_host = nullptr;
     QLineEdit *m_user = nullptr;
     QLineEdit *m_fingerprint = nullptr;

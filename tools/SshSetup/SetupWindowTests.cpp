@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QFile>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QStackedWidget>
@@ -55,6 +56,45 @@ private slots:
         QVERIFY(window.findChild<QLabel *>(QStringLiteral("feedback"))->property("error").toBool());
         input->clear();
         QVERIFY(!next->isEnabled());
+    }
+    void fingerprintIsNotAPublicKey()
+    {
+        QTemporaryDir directory;
+        sshsetup::SetupWindow window(true, directory.filePath(QStringLiteral("connection.json")));
+        auto *pages = window.findChild<QStackedWidget *>(QStringLiteral("setupPages"));
+        pages->setCurrentIndex(1);
+        window.findChild<QPlainTextEdit *>(QStringLiteral("publicKeyInput"))
+            ->setPlainText(QStringLiteral("SHA256:") + QString(43, QLatin1Char('A')));
+        window.findChild<QPushButton *>(QStringLiteral("nextButton"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(pages->isEnabled(), 15000);
+        QCOMPARE(pages->currentIndex(), 1);
+        auto *feedback = window.findChild<QLabel *>(QStringLiteral("feedback"));
+        QVERIFY(feedback->text().contains(QStringLiteral("指纹")));
+        QVERIFY(feedback->text().contains(QStringLiteral("公钥")));
+        QVERIFY(feedback->property("error").toBool());
+        QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("connection.json"))));
+    }
+    void publicKeyAndDiagnosticHaveSeparateControls()
+    {
+        QTemporaryDir directory;
+        sshsetup::SetupWindow window(false, directory.filePath(QStringLiteral("connection.json")));
+        auto *key = window.findChild<QPlainTextEdit *>(QStringLiteral("publicKeyPreview"));
+        QVERIFY(key && key->isReadOnly());
+        QVERIFY(key->toPlainText().isEmpty());
+        auto *copy = window.findChild<QPushButton *>(QStringLiteral("copyConnectionReportButton"));
+        QVERIFY(copy && !copy->isEnabled());
+    }
+    void changingTargetClearsVisibleDiagnostic()
+    {
+        QTemporaryDir directory;
+        sshsetup::SetupWindow window(false, directory.filePath(QStringLiteral("connection.json")));
+        window.findChild<QStackedWidget *>(QStringLiteral("setupPages"))->setCurrentIndex(3);
+        auto *feedback = window.findChild<QLabel *>(QStringLiteral("feedback"));
+        feedback->setText(QStringLiteral("旧目标认证：通过"));
+        window.findChild<QLineEdit *>(QStringLiteral("hostEdit"))->setText(QStringLiteral("new-host"));
+        QVERIFY(feedback->text().contains(QStringLiteral("重新测试")));
+        QVERIFY(!feedback->text().contains(QStringLiteral("通过")));
+        QVERIFY(!window.findChild<QPushButton *>(QStringLiteral("copyConnectionReportButton"))->isEnabled());
     }
 };
 

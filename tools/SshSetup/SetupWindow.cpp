@@ -196,15 +196,15 @@ void SetupWindow::buildEnvironmentPage()
     connect(check, &QPushButton::clicked, this, &SetupWindow::inspectEnvironment);
     if (m_homeMode)
     {
-        auto *copyReport = new QPushButton(tr("复制检测结果"), page);
+        auto *copyReport = new QPushButton(tr("复制脱敏诊断"), page);
         copyReport->setObjectName(QStringLiteral("copyEnvironmentButton"));
         layout->addWidget(copyReport, 0, Qt::AlignLeft);
         connect(copyReport, &QPushButton::clicked, this,
                 [this]
                 {
                     if (!m_preview)
-                        QApplication::clipboard()->setText(m_environmentText->text() +
-                                                           QStringLiteral("\n\n") + m_feedback->text());
+                        QApplication::clipboard()->setText(
+                            m_environmentReport.isEmpty() ? tr("家庭环境尚未检查。") : m_environmentReport);
                 });
         auto *optional = new QPushButton(tr("打开 Windows 可选功能"), page);
         auto *startService = new QPushButton(tr("启动 SSH 服务…"), page);
@@ -260,7 +260,9 @@ void SetupWindow::buildEnvironmentPage()
                 });
         layout->addWidget(
             label(tr("已有 SSH 服务只追加公钥，不更改默认 "
-                     "Shell，不重启服务。缺少服务时，请按验证说明完成系统安装及 Tailscale 访问限制。"),
+                     "Shell，不重启服务。\n未安装：在可选功能中添加 OpenSSH 服务器，安装失败保留系统错误。\n"
+                     "已安装但未运行：点击“启动 SSH 服务…”并确认。\n"
+                     "服务运行仍无法连接：检查监听地址与 Tailscale 访问规则，勿直接开放公网端口。"),
                   page, "muted"));
     }
     layout->addStretch();
@@ -301,6 +303,14 @@ void SetupWindow::buildAuthorizationPage()
         makePage(tr("将这台电脑授权给家庭电脑"), tr("请在家庭电脑的配置工具中导入这里的公钥。"), layout);
     m_publicSummary = label(tr("尚未准备公钥"), page);
     layout->addWidget(m_publicSummary);
+    layout->addWidget(label(tr("公钥正文（用于家庭端授权）"), page, "section"));
+    m_publicKeyPreview = new QPlainTextEdit(page);
+    m_publicKeyPreview->setObjectName(QStringLiteral("publicKeyPreview"));
+    m_publicKeyPreview->setReadOnly(true);
+    m_publicKeyPreview->setMaximumHeight(90);
+    m_publicKeyPreview->setPlaceholderText(
+        tr("准备身份后显示 ssh-ed25519 开头的公钥；SHA256 指纹不能用于授权。"));
+    layout->addWidget(m_publicKeyPreview);
     auto *buttons = new QHBoxLayout;
     auto *copy = new QPushButton(tr("复制公钥"), page);
     auto *exportKey = new QPushButton(tr("导出公钥"), page);
@@ -353,26 +363,35 @@ void SetupWindow::buildConnectionPage()
     auto *import = new QPushButton(tr("导入连接信息…"), page);
     auto *test = new QPushButton(tr("测试连接"), page);
     test->setObjectName(QStringLiteral("testConnectionButton"));
+    m_copyConnectionReport = new QPushButton(tr("复制脱敏诊断"), page);
+    m_copyConnectionReport->setObjectName(QStringLiteral("copyConnectionReportButton"));
+    m_copyConnectionReport->setEnabled(false);
     buttons->addWidget(import);
     buttons->addWidget(test);
+    buttons->addWidget(m_copyConnectionReport);
     buttons->addStretch();
     layout->addLayout(buttons);
     connect(import, &QPushButton::clicked, this, &SetupWindow::importConnection);
     connect(test, &QPushButton::clicked, this, &SetupWindow::checkConnection);
+    connect(m_copyConnectionReport, &QPushButton::clicked, this,
+            [this] { QApplication::clipboard()->setText(m_connectionReport); });
     const auto invalidate = [this]
     {
         m_connectionVerified = false;
+        m_connectionReport.clear();
+        m_copyConnectionReport->setEnabled(false);
+        if (m_pages->currentIndex() == 3)
+            showFeedback(tr("连接信息已修改，请重新测试。"));
         updateActions();
     };
     connect(m_host, &QLineEdit::textChanged, this, invalidate);
     connect(m_user, &QLineEdit::textChanged, this, invalidate);
     connect(m_port, QOverload<int>::of(&QSpinBox::valueChanged), this, invalidate);
     connect(m_fingerprint, &QLineEdit::textChanged, this,
-            [this]
+            [this, invalidate]
             {
                 m_fingerprintConfirmed->setChecked(false);
-                m_connectionVerified = false;
-                updateActions();
+                invalidate();
             });
     connect(m_fingerprintConfirmed, &QCheckBox::toggled, this, invalidate);
     layout->addStretch();
@@ -519,22 +538,26 @@ void SetupWindow::inspectEnvironment()
     if (m_homeMode)
     {
         auto result = std::make_shared<HomeEnvironment>();
-        runOperation(
-            [result] { *result = inspectHomeEnvironment(); },
-            [this, result]
-            {
-                m_homeEnvironment = *result;
-                m_environmentReady = result->sshAvailable && result->error.isEmpty();
-                m_environmentText->setText(
-                    tr("当前用户：%1\nSSH 服务：%2\n配置文件：%3\n\n家庭地址：%4\nSSH 端口：%5\n授权文件：%6")
-                        .arg(result->userName, result->serviceState,
-                             QDir::toNativeSeparators(result->configurationPath), result->host)
-                        .arg(result->port)
-                        .arg(result->authorizedKeysPath));
-                m_importSummary->setText(tr("当前家庭用户：%1").arg(result->userName));
-                showFeedback(m_environmentReady ? tr("环境检查完成，可以导入公钥。") : result->error,
-                             !m_environmentReady);
-            });
+        runOperation([result] { *result = inspectHomeEnvironment(); },
+                     [this, result]
+                     {
+                         m_homeEnvironment = *result;
+                         m_environmentReport = homeEnvironmentReport(*result);
+                         m_environmentReady = result->sshAvailable && result->error.isEmpty();
+                         m_environmentText->setText(
+                             tr("家庭主机：%7\n当前用户：%1\nSSH 服务：%2\n配置文件：%3\n"
+                                "服务程序：%8\n\n家庭地址：%4\nSSH 端口：%5\n授权文件：%6\n%9")
+                                 .arg(result->userName, result->serviceState,
+                                      QDir::toNativeSeparators(result->configurationPath), result->host)
+                                 .arg(result->port)
+                                 .arg(result->authorizedKeysPath, result->hostName,
+                                      QDir::toNativeSeparators(result->serviceExecutable),
+                                      result->listenWarning));
+                         m_importSummary->setText(
+                             tr("家庭主机：%1\n当前家庭用户：%2").arg(result->hostName, result->userName));
+                         showFeedback(m_environmentReady ? tr("环境检查完成，可以导入公钥。") : result->error,
+                                      !m_environmentReady);
+                     });
         return;
     }
     auto result = std::make_shared<EnvironmentStatus>();
@@ -581,13 +604,21 @@ void SetupWindow::prepareIdentity(const QString &existingPath)
             if (!result->success)
             {
                 m_identity = {};
+                m_publicKeyPreview->clear();
+                m_publicSummary->setText(tr("尚未准备公钥"));
+                m_connectionVerified = false;
+                m_connectionReport.clear();
+                m_copyConnectionReport->setEnabled(false);
                 m_identityText->setText(tr("身份尚未准备好。请解决下方问题后重试。"));
                 showFeedback(result->error, true);
                 return;
             }
             m_identity = result->identity;
+            m_publicKeyPreview->setPlainText(m_identity.publicKey);
             m_profile.identityFile = m_identity.privateKeyPath;
             m_connectionVerified = false;
+            m_connectionReport.clear();
+            m_copyConnectionReport->setEnabled(false);
             m_identityText->setText(tr("本机身份已准备好\n\n公钥指纹：%1\n\n私钥文件：%2")
                                         .arg(m_identity.fingerprint, m_identity.privateKeyPath));
             m_publicSummary->setText(tr("本机设备：%1\n\n公钥指纹：%2")
@@ -683,17 +714,15 @@ void SetupWindow::checkConnection()
     auto result = std::make_shared<ConnectionResult>();
     const auto profile = m_profile;
     m_connectionVerified = false;
+    m_connectionReport.clear();
+    m_copyConnectionReport->setEnabled(false);
     runOperation([result, profile] { *result = testConnection(profile); },
                  [this, result]
                  {
                      m_connectionVerified = result->authenticated && result->claudeAvailable;
-                     const auto state = [this](bool passed)
-                     { return passed ? tr("通过") : tr("未通过 / 未完成"); };
-                     showFeedback(tr("网络：%1　SSH 服务：%2\n密钥认证：%3　Claude：%4\n%5")
-                                      .arg(state(result->networkReachable), state(result->sshReachable),
-                                           state(result->authenticated), state(result->claudeAvailable),
-                                           result->details),
-                                  !m_connectionVerified);
+                     m_connectionReport = formatConnectionReport(*result);
+                     m_copyConnectionReport->setEnabled(true);
+                     showFeedback(m_connectionReport, !m_connectionVerified);
                  });
 }
 
@@ -804,7 +833,12 @@ void SetupWindow::setPreviewPage(int page)
         return;
     if (m_homeMode)
     {
-        m_importSummary->setText(tr("当前家庭用户：homeuser（界面预览）"));
+        m_environmentText->setText(
+            tr("家庭主机：家庭电脑（界面预览）\n当前用户：homeuser\nSSH 服务：运行中（示例）\n"
+               "配置文件：系统 SSH 配置目录\n服务程序：当前服务安装位置\n\n"
+               "监听提示：配置仅含回环地址，其他电脑不能通过该地址连接。\n"
+               "配置不等于实际监听；修改后请由管理员核对生效情况。"));
+        m_importSummary->setText(tr("家庭主机：家庭电脑（界面预览）\n当前家庭用户：homeuser"));
         m_applySummary->setText(
             tr("目标用户：homeuser（示例）\n\n授权文件：用户目录中的 "
                ".ssh/authorized_keys\n\n公钥指纹：校验后显示\n\n变更：追加公钥并检查权限，保留已有授权。"));

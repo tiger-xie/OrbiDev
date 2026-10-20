@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QSysInfo>
 #include <QUuid>
 #include <QtEndian>
 #include <memory>
@@ -122,6 +123,12 @@ bool validatePublicKey(const QString &input, QString &normalized, QString &finge
         line.contains(QStringLiteral("PRIVATE KEY")) || line.contains(QChar::Null))
     {
         error = QStringLiteral("请提供一行 Ed25519 公钥，不能导入私钥或多行内容。");
+        return false;
+    }
+    if (QRegularExpression(QStringLiteral("^(?:\\d+[ \\t]+)?SHA256:")).match(line).hasMatch())
+    {
+        error = QStringLiteral("这是 SSH 指纹，不是公钥。请在公司端点击“复制公钥”，"
+                               "或导入对应的 .pub 文件；不要提供私钥。");
         return false;
     }
     const auto match =
@@ -404,9 +411,73 @@ bool readSshConfiguration(const QString &path, QString &configuration, QString &
     return true;
 }
 
+QString sshListenConfigurationWarning(const QString &configuration)
+{
+    bool hasAddress = false;
+    bool allLoopback = true;
+    bool uncertain = false;
+    bool inMatch = false;
+    for (QString line : configuration.split(QLatin1Char('\n')))
+    {
+        line = line.section(QLatin1Char('#'), 0, 0).trimmed();
+        const QStringList words = line.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+        if (words.isEmpty())
+            continue;
+        const QString directive = words.first().toLower();
+        if (directive == QStringLiteral("include"))
+            uncertain = true;
+        if (directive == QStringLiteral("match"))
+            inMatch = true;
+        if (directive != QStringLiteral("listenaddress"))
+            continue;
+        if (words.size() != 2 || inMatch)
+        {
+            uncertain = true;
+            continue;
+        }
+        hasAddress = true;
+        const QString address = words[1];
+        bool loopback =
+            address == QStringLiteral("::1") ||
+            QRegularExpression(QStringLiteral("^\\[::1\\](?::[0-9]+)?$")).match(address).hasMatch();
+        const auto ipv4 =
+            QRegularExpression(
+                QStringLiteral("^127\\.([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3})(?::[0-9]+)?$"))
+                .match(address);
+        if (ipv4.hasMatch())
+            loopback = ipv4.captured(1).toUInt() <= 255 && ipv4.captured(2).toUInt() <= 255 &&
+                       ipv4.captured(3).toUInt() <= 255;
+        allLoopback = allLoopback && loopback;
+    }
+    if (uncertain)
+        return QStringLiteral("配置含扩展或无法识别的监听规则，请人工核对；配置不代表服务当前实际监听。");
+    if (hasAddress && allLoopback)
+        return QStringLiteral("sshd_config 仅配置了回环监听，其他电脑无法使用这些地址连接。"
+                              "请人工核对 Tailscale 监听配置与服务实际监听；此工具不会改配置或重启服务。");
+    return {};
+}
+
+QString homeEnvironmentReport(const HomeEnvironment &environment)
+{
+    QString service = QStringLiteral("未检测到安装");
+    if (environment.serviceInstalled)
+        service = environment.sshAvailable                               ? QStringLiteral("运行中")
+                  : environment.serviceState == QStringLiteral("未运行") ? QStringLiteral("未运行")
+                                                                         : QStringLiteral("状态未确认");
+    return QStringLiteral("OrbiDev 家庭端诊断（已脱敏）\nOpenSSH 服务：%1\n账户类型：%2\n"
+                          "配置监听提示：%3\n环境检查：%4\n"
+                          "此报告不确认实际端口可达、密钥认证或远程 Claude 状态；请从公司端测试连接。")
+        .arg(service, environment.administrator ? QStringLiteral("管理员组账户") : QStringLiteral("普通账户"),
+             environment.listenWarning.isEmpty() ? QStringLiteral("无专项警告／尚未检查")
+                                                 : QStringLiteral("需人工核对配置与实际监听"),
+             environment.error.isEmpty() && environment.sshAvailable ? QStringLiteral("通过")
+                                                                     : QStringLiteral("未通过／未完成"));
+}
+
 HomeEnvironment inspectHomeEnvironment()
 {
     HomeEnvironment result;
+    result.hostName = QSysInfo::machineHostName();
     wchar_t userName[257]{};
     DWORD userNameLength = 257;
     if (!GetUserNameW(userName, &userNameLength))
@@ -428,6 +499,7 @@ HomeEnvironment inspectHomeEnvironment()
             "Tailscale／回环访问的防火墙规则并启动 sshd。此工具不会更改现有服务或默认 Shell。");
         return result;
     }
+    result.serviceInstalled = true;
     const auto command = QRegularExpression(QStringLiteral("^(?:\"([^\"]+sshd\\.exe)\"|([^\"]+sshd\\.exe))$"),
                                             QRegularExpression::CaseInsensitiveOption)
                              .match(imagePath);
@@ -440,6 +512,7 @@ HomeEnvironment inspectHomeEnvironment()
     QString executable = command.captured(1).isEmpty() ? command.captured(2) : command.captured(1);
     executable.replace(QStringLiteral("%SystemRoot%"), qEnvironmentVariable("SystemRoot"),
                        Qt::CaseInsensitive);
+    result.serviceExecutable = executable;
     if (!QFileInfo(executable).isFile())
     {
         result.error = QStringLiteral("sshd 服务程序不存在，请修复 OpenSSH Server 安装。");
@@ -473,12 +546,17 @@ HomeEnvironment inspectHomeEnvironment()
         result.error += QStringLiteral("\nsshd 服务状态：%1").arg(result.serviceState);
         return result;
     }
+    result.listenWarning = sshListenConfigurationWarning(configuration);
     if (!resolveAuthorizedKeys(configuration, result.administrator, QDir::homePath(), programData,
                                result.authorizedKeysPath, result.port, result.error))
         return result;
     if (!result.sshAvailable)
     {
-        result.error = QStringLiteral("OpenSSH 服务尚未运行；请检查服务状态后重新检测。");
+        result.error = serviceStatusRead
+                           ? QStringLiteral("OpenSSH 已安装但服务未运行。可在确认后启动 sshd，再重新检测；"
+                                            "启动失败请保留系统错误并核对配置，此工具不自动安装或重启服务。")
+                           : QStringLiteral("OpenSSH 已安装，但无法读取服务状态；请检查权限后重新检测，"
+                                            "不能据此判断服务未运行。");
         return result;
     }
     QString tailscale = QStandardPaths::findExecutable(QStringLiteral("tailscale.exe"));
@@ -512,7 +590,9 @@ bool matchesAuthorizationPreview(const HomeEnvironment &expected, const HomeEnvi
         return false;
     }
     if (!expected.error.isEmpty() || !expected.sshAvailable || !actual.sshAvailable ||
-        expected.userName != actual.userName || expected.authorizedKeysPath != actual.authorizedKeysPath ||
+        expected.hostName != actual.hostName || expected.serviceExecutable != actual.serviceExecutable ||
+        expected.listenWarning != actual.listenWarning || expected.userName != actual.userName ||
+        expected.authorizedKeysPath != actual.authorizedKeysPath ||
         expected.configurationPath != actual.configurationPath ||
         expected.administrator != actual.administrator || expected.port != actual.port ||
         expected.host != actual.host || expected.hostFingerprint != actual.hostFingerprint ||

@@ -22,8 +22,11 @@ QString openSshTool(const QString &name)
     const QString path = qEnvironmentVariable("SystemRoot") + QStringLiteral("/System32/OpenSSH/") + name;
     return QFileInfo::exists(path) ? path : QString();
 }
-bool run(const QString &program, const QStringList &arguments, QByteArray &output, int timeout = 12000)
+bool run(const QString &program, const QStringList &arguments, QByteArray &output, int timeout = 12000,
+         bool *timedOut = nullptr)
 {
+    if (timedOut)
+        *timedOut = false;
     if (program.isEmpty())
         return false;
     QProcess process;
@@ -34,8 +37,11 @@ bool run(const QString &program, const QStringList &arguments, QByteArray &outpu
     process.closeWriteChannel();
     if (!process.waitForFinished(timeout))
     {
+        if (timedOut)
+            *timedOut = true;
         process.kill();
         process.waitForFinished(3000);
+        output = process.readAll().left(65536);
         return false;
     }
     output = process.readAll().left(65536);
@@ -231,56 +237,199 @@ bool prepareSshArguments(const ConnectionProfile &profile, const QString &truste
     return true;
 }
 
+QString formatConnectionReport(const ConnectionResult &result)
+{
+    const auto status = [](CheckStatus value)
+    {
+        switch (value)
+        {
+        case CheckStatus::Passed:
+            return QStringLiteral("通过");
+        case CheckStatus::Failed:
+            return QStringLiteral("失败");
+        case CheckStatus::Inconclusive:
+            return QStringLiteral("未能确认");
+        default:
+            return QStringLiteral("未执行");
+        }
+    };
+    QString reason;
+    switch (result.issue)
+    {
+    case ConnectionIssue::None:
+        reason = QStringLiteral("检测完成；未启动 Claude，也未确认工作区信任。");
+        break;
+    case ConnectionIssue::InvalidProfile:
+        reason = QStringLiteral("连接字段无效，请检查地址、用户名、端口及指纹格式。");
+        break;
+    case ConnectionIssue::ClientUnavailable:
+        reason = QStringLiteral("本机 OpenSSH 不可用或无法解析连接配置，请安装或检查客户端。");
+        break;
+    case ConnectionIssue::NetworkUnavailable:
+        reason = QStringLiteral("网络或 SSH 端口不可达，请检查 Tailscale、家庭电脑及监听地址。");
+        break;
+    case ConnectionIssue::BannerTimeout:
+        reason = QStringLiteral("端口可达，但等待 SSH 服务标识超时；请检查该端口是否由 sshd 监听。");
+        break;
+    case ConnectionIssue::BannerClosed:
+        reason = QStringLiteral("端口可达，但对端在发送 SSH 服务标识前关闭连接。");
+        break;
+    case ConnectionIssue::UnknownHost:
+        reason = QStringLiteral("主机身份尚未信任，请在家庭端核对完整指纹后配置；未自动接受主机密钥。");
+        break;
+    case ConnectionIssue::HostKeyChanged:
+        reason =
+            QStringLiteral("主机指纹不匹配或已变化，已停止连接；请在家庭端重新核对，不要直接删除信任记录。");
+        break;
+    case ConnectionIssue::TrustPreparationFailed:
+        reason = QStringLiteral("未能准备严格主机校验，请检查本机身份文件与家庭主机公钥；未建立新信任。");
+        break;
+    case ConnectionIssue::AuthenticationFailed:
+        reason = QStringLiteral(
+            "SSH 认证失败，请核对登录账户、公钥授权及本机身份；加密私钥可在交互终端输入口令。");
+        break;
+    case ConnectionIssue::ProbeTimeout:
+        reason = QStringLiteral("SSH 检测超时；未完成的阶段不能视为通过，请检查网络及家庭端服务。");
+        break;
+    case ConnectionIssue::PowerShellUnavailable:
+        reason = QStringLiteral(
+            "SSH 已认证，但远端 PowerShell 检查未完成，请检查 PowerShell 可执行文件和远端 Shell 配置。");
+        break;
+    case ConnectionIssue::ClaudeUnavailable:
+        reason = QStringLiteral("远端 PowerShell 可用，但找不到 Claude，请检查家庭端安装及该账户的 PATH。");
+        break;
+    case ConnectionIssue::ProbeFailed:
+        reason = QStringLiteral("SSH 检测未完成且无法确定原因，请检查家庭端服务日志；未放宽主机校验。");
+        break;
+    }
+    return QStringLiteral("SSH 连接诊断（脱敏）\n网络端口：%1\nSSH 服务：%2\n主机信任：%3\n认证：%4\n远端 "
+                          "PowerShell：%5\nClaude 命令：%6\n%7")
+        .arg(status(result.networkStatus), status(result.sshStatus), status(result.trustStatus),
+             status(result.authenticationStatus), status(result.powershellStatus),
+             status(result.claudeStatus), reason);
+}
+
+ConnectionResult classifySshProbeResult(const QByteArray &output, bool success, bool timedOut)
+{
+    ConnectionResult result;
+    result.networkReachable = result.sshReachable = true;
+    result.networkStatus = result.sshStatus = CheckStatus::Passed;
+    const QByteArray lower = output.toLower();
+    // SSH 的详细输出只在内存中用于阶段判断，绝不拼入用户报告。
+    const bool authenticated = output.contains("ORBIDEV_AUTH_OK") || lower.contains("authenticated to ") ||
+                               lower.contains("authentication succeeded (");
+    if (lower.contains("remote host identification has changed") ||
+        (lower.contains("host key verification failed") && lower.contains("offending ")))
+    {
+        result.trustStatus = CheckStatus::Failed;
+        result.issue = ConnectionIssue::HostKeyChanged;
+    }
+    else if (lower.contains("host key verification failed") ||
+             lower.contains("no ed25519 host key is known") || lower.contains("no rsa host key is known") ||
+             lower.contains("no ecdsa host key is known"))
+    {
+        result.trustStatus = CheckStatus::Failed;
+        result.issue = ConnectionIssue::UnknownHost;
+    }
+    else if (authenticated)
+    {
+        result.authenticated = true;
+        result.trustStatus = result.authenticationStatus = CheckStatus::Passed;
+        if (success && output.contains("ORBIDEV_AUTH_OK"))
+        {
+            result.powershellStatus = CheckStatus::Passed;
+            result.claudeAvailable = output.contains("ORBIDEV_CLAUDE_OK");
+            result.claudeStatus = result.claudeAvailable ? CheckStatus::Passed : CheckStatus::Failed;
+            result.issue =
+                result.claudeAvailable ? ConnectionIssue::None : ConnectionIssue::ClaudeUnavailable;
+        }
+        else
+        {
+            result.powershellStatus = timedOut ? CheckStatus::Inconclusive : CheckStatus::Failed;
+            result.issue = timedOut ? ConnectionIssue::ProbeTimeout : ConnectionIssue::PowerShellUnavailable;
+        }
+    }
+    else if (lower.contains("permission denied (") || lower.contains("no more authentication methods to try"))
+    {
+        result.trustStatus = CheckStatus::Passed;
+        result.authenticationStatus = CheckStatus::Failed;
+        result.issue = ConnectionIssue::AuthenticationFailed;
+    }
+    else
+    {
+        result.trustStatus = CheckStatus::Inconclusive;
+        result.issue = timedOut ? ConnectionIssue::ProbeTimeout : ConnectionIssue::ProbeFailed;
+    }
+    result.details = formatConnectionReport(result);
+    return result;
+}
+
 ConnectionResult testConnection(const ConnectionProfile &profile)
 {
     ConnectionResult result;
-    if (!validateProfile(profile, result.details))
+    const auto finish = [&result](ConnectionIssue issue)
+    {
+        result.issue = issue;
+        result.details = formatConnectionReport(result);
         return result;
-    // SSH 别名先由 OpenSSH 展开，仅用于诊断目标；不执行用户提供的远端命令。
+    };
+    QString error;
+    if (!validateProfile(profile, error))
+        return finish(ConnectionIssue::InvalidProfile);
     QByteArray effective;
     if (!run(openSshTool(QStringLiteral("ssh.exe")),
              {QStringLiteral("-G"), QStringLiteral("-p"), QString::number(profile.port), profile.host},
              effective))
-    {
-        result.details = QStringLiteral("无法解析 SSH 配置，请检查 OpenSSH 客户端。");
-        return result;
-    }
+        return finish(ConnectionIssue::ClientUnavailable);
     QString resolvedHost = profile.host;
     for (const auto &line : effective.split('\n'))
-    {
         if (line.startsWith("hostname "))
             resolvedHost = QString::fromUtf8(line.mid(9)).trimmed();
-    }
     QTcpSocket socket;
     socket.connectToHost(resolvedHost, quint16(profile.port));
     if (!socket.waitForConnected(5000))
     {
-        result.details = QStringLiteral("网络或 SSH 端口不可达。请检查家庭电脑、Tailscale 与服务端口。");
-        return result;
+        result.networkStatus = CheckStatus::Failed;
+        return finish(ConnectionIssue::NetworkUnavailable);
     }
     result.networkReachable = true;
+    result.networkStatus = CheckStatus::Passed;
     QElapsedTimer bannerTimer;
     bannerTimer.start();
     QByteArray banner;
     while (bannerTimer.elapsed() < 3000 && banner.size() < 8192 && !result.sshReachable)
     {
         if (socket.bytesAvailable() == 0 && !socket.waitForReadyRead(300))
+        {
+            if (socket.state() == QAbstractSocket::UnconnectedState)
+                break;
             continue;
+        }
         banner += socket.read(8192 - banner.size());
         for (const auto &line : banner.split('\n'))
             if (line.startsWith("SSH-2.0-") || line.startsWith("SSH-1.99-"))
                 result.sshReachable = true;
     }
+    const bool closed = socket.state() == QAbstractSocket::UnconnectedState;
     socket.abort();
     if (!result.sshReachable)
     {
-        result.details = QStringLiteral("端口可达，但未收到 SSH 服务标识。");
-        return result;
+        result.sshStatus = CheckStatus::Failed;
+        return finish(closed ? ConnectionIssue::BannerClosed : ConnectionIssue::BannerTimeout);
     }
+    result.sshStatus = CheckStatus::Passed;
     QTemporaryDir trustedDirectory;
     QStringList arguments;
-    if (!prepareSshArguments(profile, trustedDirectory.path(), arguments, result.details))
-        return result;
+    if (!prepareSshArguments(profile, trustedDirectory.path(), arguments, error))
+    {
+        result.trustStatus = CheckStatus::Inconclusive;
+        if (error.contains(QStringLiteral("指纹不一致")))
+        {
+            result.trustStatus = CheckStatus::Failed;
+            return finish(ConnectionIssue::HostKeyChanged);
+        }
+        return finish(ConnectionIssue::TrustPreparationFailed);
+    }
     // 固定脚本仅检查命令位置，不启动 Claude，也不会确认工作区信任提示。
     const QString script = QStringLiteral("[Console]::WriteLine('ORBIDEV_AUTH_OK'); "
                                           "if (Get-Command claude -ErrorAction SilentlyContinue) { "
@@ -291,24 +440,14 @@ ConnectionResult testConnection(const ConnectionProfile &profile)
         encoded.append(char(character.unicode() & 0xff));
         encoded.append(char(character.unicode() >> 8));
     }
+    arguments.prepend(QStringLiteral("-v"));
     arguments << QStringLiteral("powershell.exe") << QStringLiteral("-NoLogo") << QStringLiteral("-NoProfile")
               << QStringLiteral("-NonInteractive") << QStringLiteral("-EncodedCommand")
               << QString::fromLatin1(encoded.toBase64());
     QByteArray output;
-    const bool success = run(openSshTool(QStringLiteral("ssh.exe")), arguments, output, 15000);
-    result.authenticated = success && output.contains("ORBIDEV_AUTH_OK");
-    result.claudeAvailable = result.authenticated && output.contains("ORBIDEV_CLAUDE_OK");
-    if (result.claudeAvailable)
-        result.details =
-            QStringLiteral("网络、SSH 服务、密钥认证均通过；远端可找到 Claude。尚未启动 Claude 会话。");
-    else if (result.authenticated)
-        result.details =
-            QStringLiteral("SSH 认证通过，但远端 PowerShell 找不到 Claude，请检查家庭电脑安装与 PATH。");
-    else
-        result.details =
-            QStringLiteral("SSH 验证未通过：可能是密钥未授权、主机指纹未知或变化、远端 PowerShell 不可用。"
-                           "请核对家庭端导出的指纹和授权账户；未自动接受主机密钥。");
-    return result;
+    bool timedOut = false;
+    const bool success = run(openSshTool(QStringLiteral("ssh.exe")), arguments, output, 15000, &timedOut);
+    return classifySshProbeResult(output, success, timedOut);
 }
 
 bool saveProfile(const QString &path, const ConnectionProfile &profile, QString &error)
