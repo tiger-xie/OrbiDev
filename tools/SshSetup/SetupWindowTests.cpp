@@ -2,6 +2,7 @@
 #include "SetupWindow.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QFile>
 #include <QIcon>
 #include <QLabel>
@@ -18,6 +19,105 @@ class SetupWindowTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void homeStepsAndConfirmationFollowActualResults()
+    {
+        QTemporaryDir directory;
+        sshsetup::SetupWindow window(true, directory.filePath(QStringLiteral("connection.json")));
+        window.setPage(2);
+        QCOMPARE(window.m_stepRows.size(), 4);
+        for (auto *step : window.m_stepRows)
+            QCOMPARE(step->property("state").toString(), QStringLiteral("pending"));
+        QVERIFY(!window.m_applyConfirmed->isChecked());
+        QVERIFY(!window.m_next->isEnabled());
+        window.m_environmentReady = true;
+        window.m_normalizedKey = QStringLiteral("公开测试占位");
+        window.m_importFingerprint = QStringLiteral("SHA256:旧校验");
+        window.m_applyConfirmed->setChecked(true);
+        window.updateActions();
+        QVERIFY(window.m_next->isEnabled());
+        window.m_publicInput->setPlainText(QStringLiteral("新输入"));
+        QVERIFY(window.m_normalizedKey.isEmpty());
+        QVERIFY(window.m_importFingerprint.isEmpty());
+        QVERIFY(!window.m_applyConfirmed->isChecked());
+        QVERIFY(!window.m_next->isEnabled());
+        QVERIFY(!window.m_applySummary->text().contains(QStringLiteral("旧校验")));
+        window.m_applyConfirmed->setChecked(true);
+        window.invalidateImportResults();
+        QVERIFY(!window.m_applyConfirmed->isChecked());
+        window.m_importFailed = true;
+        window.updateActions();
+        QCOMPARE(window.m_stepRows[1]->property("state").toString(), QStringLiteral("failed"));
+        window.m_authorized = true;
+        window.setPage(3);
+        QVERIFY(!window.m_back->isEnabled());
+        QVERIFY(window.m_next->isEnabled());
+        QVERIFY(window.m_exportConnection->isEnabled());
+        QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("connection.json"))));
+    }
+
+    void homePreviewIsInertAndFitsNarrowWindow()
+    {
+        QTemporaryDir directory;
+        sshsetup::SetupWindow window(true, directory.filePath(QStringLiteral("connection.json")), {}, true);
+        window.resize(880, 620);
+        window.show();
+        for (int page = 0; page < 4; ++page)
+        {
+            window.setPreviewPage(page);
+            QTest::qWait(30);
+            QVERIFY(!window.m_next->isEnabled());
+            QVERIFY(!window.m_pages->isEnabled());
+            for (auto *step : window.m_stepRows)
+                QCOMPARE(step->property("state").toString(), QStringLiteral("pending"));
+            auto *scroll = qobject_cast<QScrollArea *>(window.m_pages->currentWidget());
+            QVERIFY(scroll);
+            QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+            QVERIFY(window.rect().contains(
+                QRect(window.m_next->mapTo(&window, QPoint()), window.m_next->size())));
+        }
+        window.setPreviewPage(2);
+        window.m_applySummary->setText(QString(500, QLatin1Char('A')));
+        QTest::qWait(30);
+        QCOMPARE(
+            qobject_cast<QScrollArea *>(window.m_pages->currentWidget())->horizontalScrollBar()->maximum(),
+            0);
+        QVERIFY(!window.m_worker);
+        QVERIFY(!window.m_authorized);
+        QVERIFY(window.m_importFingerprint.isEmpty());
+        QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("connection.json"))));
+    }
+
+    void publicKeyValidationDoesNotApplyAuthorization()
+    {
+        QTemporaryDir directory;
+        sshsetup::SetupWindow window(true, directory.filePath(QStringLiteral("connection.json")));
+        window.m_homeEnvironment.userName = QStringLiteral("test-user");
+        window.m_homeEnvironment.authorizedKeysPath = directory.filePath(QStringLiteral("authorized_keys"));
+        window.m_environmentReady = true;
+        window.setPage(1);
+        const QByteArray blob = QByteArray::fromHex("0000000b") + QByteArray("ssh-ed25519") +
+                                QByteArray::fromHex("00000020") + QByteArray(32, 'a');
+        const QString key = QStringLiteral("ssh-ed25519 ") + QString::fromLatin1(blob.toBase64()) +
+                            QStringLiteral(" company-device");
+        window.m_publicInput->setPlainText(key);
+        window.next();
+        QTRY_VERIFY_WITH_TIMEOUT(!window.m_busy, 15000);
+        QCOMPARE(window.m_pages->currentIndex(), 2);
+        QVERIFY(window.m_importFingerprint.startsWith(QStringLiteral("SHA256:")));
+        QVERIFY(window.m_importDetails->text().contains(window.m_importFingerprint));
+        QVERIFY(!window.m_applyConfirmed->isChecked());
+        QVERIFY(!window.m_authorized);
+        QVERIFY(!QFile::exists(window.m_homeEnvironment.authorizedKeysPath));
+        window.setPage(1);
+        window.m_publicInput->setPlainText(QStringLiteral("command=\"echo bad\" ") + key);
+        window.next();
+        QTRY_VERIFY_WITH_TIMEOUT(!window.m_busy, 15000);
+        QCOMPARE(window.m_pages->currentIndex(), 1);
+        QVERIFY(window.m_importFailed);
+        QVERIFY(window.m_importFingerprint.isEmpty());
+        QVERIFY(!QFile::exists(window.m_homeEnvironment.authorizedKeysPath));
+    }
+
     void initTestCase()
     {
         sshsetup::applySetupTheme(*qApp);
@@ -38,7 +138,7 @@ private slots:
             const QIcon icon(QStringLiteral(":/resources/icon/common/%1.svg").arg(QString::fromLatin1(name)));
             QVERIFY(!icon.pixmap(24, 24).isNull());
         }
-        for (const auto *name : {"copy", "export", "error"})
+        for (const auto *name : {"copy", "export", "error", "user", "folder"})
         {
             const QIcon icon(QStringLiteral(":/resources/icon/setup/%1.svg").arg(QString::fromLatin1(name)));
             QVERIFY(!icon.pixmap(24, 24).isNull());

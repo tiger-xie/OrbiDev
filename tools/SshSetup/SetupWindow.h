@@ -52,6 +52,7 @@ private:
     void updateActions();
     void updateSteps();
     void invalidateIdentityResults();
+    void invalidateImportResults();
     void showFeedback(const QString &message, bool error = false);
     void runOperation(std::function<void()> work, std::function<void()> finished);
     void inspectEnvironment();
@@ -75,6 +76,8 @@ private:
     bool m_environmentFailed = false;
     bool m_identityFailed = false;
     bool m_connectionFailed = false;
+    bool m_importFailed = false;
+    bool m_applyFailed = false;
     QString m_profilePath;
     QString m_legacyConfigPath;
     QString m_normalizedKey;
@@ -86,7 +89,6 @@ private:
     ConnectionProfile m_profile;
     QThread *m_worker = nullptr;
     QStackedWidget *m_pages = nullptr;
-    QVector<QLabel *> m_steps;
     QVector<QWidget *> m_stepRows;
     QVector<QLabel *> m_stepBadges;
     QVector<QLabel *> m_stepDescriptions;
@@ -96,6 +98,7 @@ private:
     QLabel *m_identityText = nullptr;
     QLabel *m_publicSummary = nullptr;
     QLabel *m_importSummary = nullptr;
+    QLabel *m_importDetails = nullptr;
     QLabel *m_applySummary = nullptr;
     QLabel *m_resultSummary = nullptr;
     QPushButton *m_back = nullptr;
@@ -103,6 +106,7 @@ private:
     QPlainTextEdit *m_publicInput = nullptr;
     QPlainTextEdit *m_publicKeyPreview = nullptr;
     QPushButton *m_copyConnectionReport = nullptr;
+    QPushButton *m_exportConnection = nullptr;
     QLineEdit *m_host = nullptr;
     QLineEdit *m_user = nullptr;
     QLineEdit *m_fingerprint = nullptr;

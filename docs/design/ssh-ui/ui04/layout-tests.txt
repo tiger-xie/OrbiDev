@@ -1,0 +1,8 @@
+Internal ctest changing into directory: E:/Codex/Project/OrbiDev/build-ssh-setup
+Test project E:/Codex/Project/OrbiDev/build-ssh-setup
+    Start 5: setup.ui
+1/1 Test #5: setup.ui .........................   Passed   46.51 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =  48.93 sec

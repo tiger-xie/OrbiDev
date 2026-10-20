@@ -1,7 +1,5 @@
-/* 家庭端仍沿用原步骤；公司端按实际业务状态显示轨道。 */
+/* 两端共用步骤轨道，完成和失败状态只来自操作结果。 */
 QWidget#stepRail { background: #1d2730; border-right: 1px solid #34424e; }
-QLabel[role="step"] { padding: 18px 12px; color: #a8b5c0; border-left: 3px solid transparent; }
-QLabel[role="currentStep"] { padding: 18px 12px; background: #213e47; color: #f2ffff; border-left: 3px solid #00b7b5; }
 QWidget[role="setupStep"] { border-left: 3px solid transparent; }
 QWidget[role="setupStep"][current="true"] { background: #213b44; border-left: 3px solid #00b7b5; }
 QLabel[role="stepName"] { font-size: 16px; font-weight: 600; }
