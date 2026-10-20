@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QMenu>
 #include <QPointer>
 #include <QSignalSpy>
 #include <QThread>
@@ -146,6 +147,20 @@ void TerminalViewTests::gatesInputAndResizes()
     QCOMPARE(inputs.at(1).at(0).toByteArray(), QByteArray("\x1b"));
     QCOMPARE(inputs.at(2).at(0).toByteArray(), QByteArray("\x1b[A"));
     QCOMPARE(inputs.at(3).at(0).toByteArray(), QByteArray("\x03"));
+    inputs.clear();
+    QTest::keyClick(window, Qt::Key_Left, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_Right, Qt::ControlModifier | Qt::ShiftModifier);
+    QTRY_COMPARE(inputs.count(), 2);
+    QCOMPARE(inputs.at(0).at(0).toByteArray(), QByteArray("\x1b[1;5D"));
+    QCOMPARE(inputs.at(1).at(0).toByteArray(), QByteArray("\x1b[1;6C"));
+    inputs.clear();
+    QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
+    QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
+    QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
+    QTRY_COMPARE(inputs.count(), 3);
+    QCOMPARE(inputs.at(0).at(0).toByteArray(), QByteArray("\x1b[1;2D"));
+    QCOMPARE(inputs.at(1).at(0).toByteArray(), QByteArray("\x1b[1;2D"));
+    QCOMPARE(inputs.at(2).at(0).toByteArray(), QByteArray("\x1b[1;2C"));
     sizes.clear();
     view.resize(1000, 600);
     QTRY_VERIFY(!sizes.isEmpty());
@@ -203,6 +218,41 @@ void TerminalViewTests::clipboardAndNavigation()
     QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
     QTRY_COMPARE(inputs.count(), 1);
     QCOMPARE(inputs.first().at(0).toByteArray(), QByteArray("safe"));
+    inputs.clear();
+    QApplication::clipboard()->setText(QStringLiteral("中文粘贴"));
+    QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier);
+    QTRY_COMPARE(inputs.count(), 1);
+    QCOMPARE(inputs.first().at(0).toByteArray(), QStringLiteral("中文粘贴").toUtf8());
+    evaluate(view, QStringLiteral("clientTerminal.term.select(0,0,4)"));
+    QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
+    QTRY_COMPARE(QApplication::clipboard()->text(), QStringLiteral("safe"));
+    QCOMPARE(inputs.count(), 1);
+    evaluate(view, QStringLiteral("clientTerminal.term.clearSelection()"));
+    QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
+    QTRY_COMPARE(inputs.count(), 2);
+    QCOMPARE(inputs.last().at(0).toByteArray(), QByteArray("\x03"));
+
+    QCOMPARE(view.webView()->contextMenuPolicy(), Qt::CustomContextMenu);
+    QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, view.webView()->mapTo(&view, QPoint(20, 20)));
+    QTRY_VERIFY(view.findChild<QMenu *>(QStringLiteral("terminalContextMenu")));
+    auto *menu = view.findChild<QMenu *>(QStringLiteral("terminalContextMenu"));
+    QVERIFY(menu);
+    auto *paste = menu->findChild<QAction *>(QStringLiteral("terminalPasteAction"));
+    QVERIFY(paste && paste->isEnabled());
+    QApplication::clipboard()->setText(QStringLiteral("右键粘贴"));
+    paste->trigger();
+    QTRY_COMPARE(inputs.count(), 3);
+    QCOMPARE(inputs.last().at(0).toByteArray(), QStringLiteral("右键粘贴").toUtf8());
+    const QPointer<QMenu> menuGuard(menu);
+    menu->close();
+    QTRY_VERIFY(menuGuard.isNull());
+    view.setInputEnabled(false);
+    view.webView()->customContextMenuRequested(QPoint(20, 20));
+    menu = view.findChild<QMenu *>(QStringLiteral("terminalContextMenu"));
+    QVERIFY(menu);
+    paste = menu->findChild<QAction *>(QStringLiteral("terminalPasteAction"));
+    QVERIFY(paste && !paste->isEnabled());
+    menu->close();
     evaluate(view, QStringLiteral("window.location='https://example.com/'"));
     QTest::qWait(100);
     QCOMPARE(view.webView()->url(), QUrl(QStringLiteral("qrc:/client-terminal/client-index.html")));

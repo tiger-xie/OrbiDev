@@ -34,7 +34,10 @@
   term.attachCustomKeyEventHandler(function (event) {
     // Qt 合成键盘事件可能没有物理 code，逻辑 key 同样适用于系统键盘布局。
     const key = (event.key || '').toLowerCase();
-    if (event.ctrlKey && event.shiftKey && (key === 'c' || key === 'v')) {
+    // 有选区时 Ctrl+C 复制；无选区时保留终端中断，不吞掉远端取消操作。
+    const copy = key === 'c' && (event.shiftKey || term.hasSelection());
+    const paste = key === 'v';
+    if (event.ctrlKey && !event.altKey && (copy || paste)) {
       event.preventDefault();
       if (event.type === 'keydown' && bridge) {
         if (key === 'c') bridge.copy();

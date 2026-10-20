@@ -5,6 +5,7 @@
 #include <QClipboard>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMenu>
 #include <QPointer>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -77,7 +78,22 @@ TerminalView::TerminalView(QWidget *parent) : QWidget(parent)
     m_view = new QWebEngineView(this);
     auto *page = new OfflinePage(m_profile, m_view);
     m_view->setPage(page);
-    m_view->setContextMenuPolicy(Qt::NoContextMenu);
+    m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_view, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint &position)
+            {
+                auto *menu = new QMenu(m_view);
+                menu->setObjectName(QStringLiteral("terminalContextMenu"));
+                menu->setAttribute(Qt::WA_DeleteOnClose);
+                auto *copy = menu->addAction(tr("复制（Ctrl+Shift+C）"), this, &TerminalView::copySelection);
+                copy->setObjectName(QStringLiteral("terminalCopyAction"));
+                copy->setEnabled(m_ready && !m_failed);
+                auto *paste = menu->addAction(tr("粘贴（Ctrl+V）"), this, &TerminalView::pasteClipboard);
+                paste->setObjectName(QStringLiteral("terminalPasteAction"));
+                paste->setEnabled(m_ready && !m_failed && m_inputEnabled && !m_replayingBatch);
+                // 非阻塞菜单避免嵌套事件循环；页面销毁时菜单随视图一起释放。
+                menu->popup(m_view->mapToGlobal(position));
+            });
     setFocusProxy(m_view);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
