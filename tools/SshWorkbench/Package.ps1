@@ -78,7 +78,9 @@ Copy-Item -LiteralPath (Join-Path $workspace 'patches/README.md') -Destination (
 "@ | Set-Content -LiteralPath (Join-Path $packageDirectory 'README_使用说明.md') -Encoding UTF8
 $suffix = if ($Configuration -eq 'Debug') { 'd' } else { '' }
 $required = @('OrbiDevWorkbench.exe','OrbiDevSetup.exe','OrbiDevHomeSetup.exe',"QtWebEngineProcess$suffix.exe",'conpty.dll','x64/OpenConsole.exe',"platforms/qwindows$suffix.dll",'translations/qtwebengine_locales/en-US.pak','resources/icudtl.dat','resources/qtwebengine_resources.pak','resources/qtwebengine_resources_100p.pak','resources/qtwebengine_resources_200p.pak','resources/qtwebengine_devtools_resources.pak','vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll')
-foreach ($module in @('Core','Gui','Widgets','Network','PrintSupport','QmlModels','QuickWidgets','WebEngineCore','WebEngineWidgets','WebChannel','Qml','Quick','Positioning')) { $required += "Qt5$module$suffix.dll" }
+foreach ($module in @('Core','Gui','Widgets','Network','PrintSupport','QmlModels','QuickWidgets','WebEngineCore','WebEngineWidgets','WebChannel','Qml','Quick','Positioning','Svg')) { $required += "Qt5$module$suffix.dll" }
+$required += "iconengines/qsvgicon$suffix.dll"
+$required += "imageformats/qsvg$suffix.dll"
 foreach ($file in $required) {
     $path = Join-Path $packageDirectory $file
     if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) { throw "包缺少必需文件：$file" }

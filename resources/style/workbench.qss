@@ -1,0 +1,19 @@
+/* 仅工作台区域采用紧凑视觉，保留列表的原生键盘焦点。 */
+QWidget#workbench { background: #141b21; }
+QWidget#projectRail { background: #1d2730; border-right: 1px solid #34424e; }
+QListWidget#projectList { background: transparent; border: none; selection-color: #ffffff; }
+QListWidget#projectList::item { padding: 12px 8px; margin: 2px 0; border-left: 3px solid transparent; }
+QListWidget#projectList::item:hover { background: #273943; }
+QListWidget#projectList::item:selected { background: #213e47; border-left-color: #00b7b5; }
+QTabWidget#terminalTabs::pane { border: none; background: #0c1013; }
+QTabWidget#terminalTabs QTabBar::tab { background: #1d2730; padding: 12px 18px; border-bottom: 2px solid transparent; }
+QTabWidget#terminalTabs QTabBar::tab:hover { background: #2b3a45; }
+QTabWidget#terminalTabs QTabBar::tab:selected { background: #0c1013; border-bottom-color: #00b7b5; }
+QTabWidget#terminalTabs QTabBar::tab:disabled { color: #96a5af; }
+QPushButton[role="compact"] { padding: 7px 10px; }
+QLabel#workspaceEmptyTitle { font-size: 22px; font-weight: 600; }
+QLabel#terminalStatus { color: #a8b5c0; padding: 8px 12px; }
+QSplitter::handle { background: #34424e; }
+QSplitter::handle:hover { background: #00b7b5; }
+QStatusBar { background: #1d2730; color: #a8b5c0; border-top: 1px solid #34424e; }
+QStatusBar::item { border: none; }

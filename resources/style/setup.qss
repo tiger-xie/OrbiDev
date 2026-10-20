@@ -1,0 +1,4 @@
+/* 沿用向导现有角色；步骤轨道与分区布局在后续任务实现。 */
+QWidget#stepRail { background: #1d2730; border-right: 1px solid #34424e; }
+QLabel[role="step"] { padding: 18px 12px; color: #a8b5c0; border-left: 3px solid transparent; }
+QLabel[role="currentStep"] { padding: 18px 12px; background: #213e47; color: #f2ffff; border-left: 3px solid #00b7b5; }

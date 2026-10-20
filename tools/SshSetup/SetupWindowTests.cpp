@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QFile>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -15,6 +16,29 @@ class SetupWindowTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void initTestCase()
+    {
+        sshsetup::applySetupTheme(*qApp);
+    }
+
+    void sharedThemeResourcesAreAvailable()
+    {
+        for (const auto *name : {"base", "setup", "workbench"})
+        {
+            QFile file(QStringLiteral(":/resources/style/%1.qss").arg(QString::fromLatin1(name)));
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            const auto style = QString::fromUtf8(file.readAll());
+            QVERIFY(!style.trimmed().isEmpty());
+            QVERIFY(qApp->styleSheet().contains(style));
+        }
+        for (const auto *name : {"app", "check", "chevron-down"})
+        {
+            const QIcon icon(QStringLiteral(":/resources/icon/common/%1.svg").arg(QString::fromLatin1(name)));
+            QVERIFY(!icon.pixmap(24, 24).isNull());
+        }
+        QVERIFY(!qApp->windowIcon().isNull());
+    }
+
     void initialStateCannotSkipChecks()
     {
         QTemporaryDir directory;

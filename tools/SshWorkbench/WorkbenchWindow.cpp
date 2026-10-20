@@ -34,6 +34,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -232,20 +233,6 @@ void WorkbenchWindow::buildUi()
 {
     auto *central = new QWidget(this);
     central->setObjectName(QStringLiteral("workbench"));
-    central->setStyleSheet(QStringLiteral(R"(
-        QWidget#workbench { background: #20262c; }
-        QWidget#projectRail { background: #242d35; border-right: 1px solid #36414a; }
-        QListWidget { background: transparent; border: none; outline: none; }
-        QListWidget::item { padding: 12px 8px; margin: 2px 0; border-left: 3px solid transparent; }
-        QListWidget::item:selected { background: #29454a; border-left-color: #38c4bb; }
-        QListWidget::item:hover { background: #2c3942; }
-        QTabWidget::pane { border: none; background: #181c20; }
-        QTabBar::tab { background: #252d34; padding: 12px 18px; border-bottom: 2px solid transparent; }
-        QTabBar::tab:selected { background: #181c20; border-bottom-color: #38c4bb; }
-        QTabBar::tab:hover { background: #303e48; }
-        QPushButton[role="compact"] { padding: 7px 10px; }
-        QLabel#workspaceEmptyTitle { font-size: 22px; font-weight: 600; }
-    )"));
     auto *root = new QVBoxLayout(central);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
@@ -1276,7 +1263,9 @@ void WorkbenchWindow::showFeedback(const QString &message, bool error)
 {
     m_feedback->setText(message);
     m_feedback->setProperty("error", error);
-    m_feedback->setStyleSheet(error ? QStringLiteral("background: #3a292c; color: #ffb9ad;") : QString());
+    m_feedback->style()->unpolish(m_feedback);
+    m_feedback->style()->polish(m_feedback);
+    m_feedback->update();
     m_feedback->setVisible(!message.isEmpty());
 }
 

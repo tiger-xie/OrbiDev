@@ -1,0 +1,68 @@
+/* 石墨色公共控件；窗口背景由调色板负责，避免覆盖终端和透明标签。 */
+QWidget { color: #edf2f6; }
+QLabel[role="title"] { font-size: 24px; font-weight: 600; }
+QLabel[role="section"] { font-size: 15px; font-weight: 600; }
+QLabel[role="muted"] { color: #a8b5c0; }
+QLabel#feedback { padding: 12px; background: #1d2a32; border: 1px solid #344953; border-radius: 6px; }
+QLabel#feedback[error="true"] { background: #321e25; color: #ffbac0; border-color: #79434c; }
+QLineEdit, QPlainTextEdit, QSpinBox, QComboBox {
+    background: #151e25; border: 1px solid #465560; border-radius: 5px;
+    padding: 8px; selection-background-color: #176f73; selection-color: #ffffff;
+}
+QLineEdit:hover, QPlainTextEdit:hover, QSpinBox:hover, QComboBox:hover { border-color: #647782; }
+QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: #3bd7d1; }
+QLineEdit:disabled, QPlainTextEdit:disabled, QSpinBox:disabled, QComboBox:disabled {
+    color: #96a5af; background: #1b252c; border-color: #35414a;
+}
+QLineEdit:read-only, QPlainTextEdit:read-only { color: #c1cbd3; background: #192229; }
+QComboBox { padding-right: 30px; }
+QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 28px; border: none; }
+QComboBox::down-arrow { image: url(:/resources/icon/common/chevron-down.svg); width: 14px; height: 14px; }
+QComboBox QAbstractItemView {
+    background: #1d2730; color: #edf2f6; border: 1px solid #465560;
+    selection-background-color: #23464e; selection-color: #ffffff; padding: 4px;
+}
+QPushButton {
+    background: #26323c; border: 1px solid #556772; border-radius: 5px;
+    padding: 9px 17px;
+}
+QPushButton:hover { background: #31414c; border-color: #8296a2; }
+QPushButton:pressed { background: #1c2a33; border-color: #00b7b5; }
+QPushButton:default { border-color: #00b7b5; }
+QPushButton:focus { border-color: #83f0ea; }
+QPushButton[role="primary"] { background: #008985; color: #ffffff; border-color: #00b7b5; font-weight: 600; }
+QPushButton[role="primary"]:hover { background: #009b96; border-color: #36d9d0; }
+QPushButton[role="primary"]:pressed { background: #006d6b; border-color: #00b7b5; }
+QPushButton[role="primary"]:focus { border-color: #b1fff6; }
+QPushButton:disabled, QPushButton[role="primary"]:disabled {
+    background: #222d35; color: #96a5af; border-color: #3b4953;
+}
+QPushButton::menu-indicator { image: url(:/resources/icon/common/chevron-down.svg); width: 10px; height: 10px; subcontrol-position: bottom right; right: 4px; bottom: 4px; }
+QCheckBox { spacing: 9px; padding: 6px 0; }
+QCheckBox::indicator, QListWidget::indicator {
+    width: 17px; height: 17px; border: 1px solid #73838f; border-radius: 3px; background: #182128;
+}
+QCheckBox::indicator:hover, QListWidget::indicator:hover { border-color: #3bd7d1; }
+QCheckBox::indicator:checked, QListWidget::indicator:checked {
+    background: #008985; border-color: #00b7b5; image: url(:/resources/icon/common/check.svg);
+}
+QCheckBox::indicator:indeterminate { background: #367b7c; border-color: #3bd7d1; }
+QCheckBox::indicator:focus { border-color: #b1fff6; }
+QCheckBox:disabled { color: #96a5af; }
+QCheckBox::indicator:disabled, QListWidget::indicator:disabled { border-color: #53616b; background: #303e47; }
+QMenu { background: #1d2730; color: #edf2f6; border: 1px solid #465560; padding: 5px; }
+QMenu::item { padding: 8px 24px; border-radius: 3px; }
+QMenu::item:selected { background: #23464e; color: #ffffff; }
+QMenu::item:disabled { color: #96a5af; }
+QMenu::separator { height: 1px; background: #34424e; margin: 5px 8px; }
+QScrollArea { border: none; background: transparent; }
+QScrollBar:vertical { background: #151e25; width: 12px; margin: 0; }
+QScrollBar:horizontal { background: #151e25; height: 12px; margin: 0; }
+QScrollBar::handle { background: #485b68; border: 2px solid #151e25; border-radius: 5px; }
+QScrollBar::handle:vertical { min-height: 28px; }
+QScrollBar::handle:horizontal { min-width: 28px; }
+QScrollBar::handle:hover { background: #647e8b; }
+QScrollBar::handle:pressed { background: #00a5a2; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+QToolTip { background: #26343e; border: 1px solid #647782; color: #ffffff; padding: 5px; }
