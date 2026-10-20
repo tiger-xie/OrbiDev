@@ -39,7 +39,7 @@ private:
     void showAppearanceSettings();
     void setTerminalFontSize(int size);
     void renderHosts();
-    void editHost(bool add);
+    void editHost(bool add, const QString &hostId = {});
     void removeHost();
     bool saveState(const WorkbenchState &state);
     int projectRow() const;
@@ -56,6 +56,7 @@ private:
     void selectTerminalProject(QWidget *page);
     void updateProjectLabels();
     void updateTerminalLabel(QWidget *page);
+    void updateTerminalBanner(QWidget *page);
     void closeTerminal(int index);
     void finishTerminalClose(QWidget *page);
     void openSetup();

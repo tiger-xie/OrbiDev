@@ -29,7 +29,13 @@ QTabWidget#terminalTabs QTabBar::tab:disabled { color: #96a5af; }
 QPushButton[role="compact"] { padding: 7px 10px; }
 QLabel#workspaceEmptyTitle { font-size: 24px; font-weight: 600; padding-bottom: 12px; }
 QLabel#terminalLocation { background: #1b252d; color: #a8b5c0; padding: 12px 18px; border-bottom: 1px solid #34424e; }
-QLabel#terminalStatus { color: #a8b5c0; padding: 6px 12px; }
+QWidget#terminalBanner { background: #172129; border-bottom: 1px solid #34424e; }
+QWidget#terminalBanner[error="true"] { background: #2d1d23; border: 1px solid #65333d; }
+QLabel#terminalStatusTitle { color: #edf2f6; font-size: 16px; font-weight: 600; }
+QWidget#terminalBanner[error="true"] QLabel#terminalStatusTitle { color: #ff6975; }
+QLabel#terminalStatus { color: #b9c6cf; background: transparent; padding: 0; }
+QScrollArea#terminalStatusDetails { background: transparent; }
+QWidget#terminalStatusActions { background: transparent; }
 QSplitter::handle { background: #303e48; width: 1px; }
 QSplitter::handle:hover { background: #00b7b5; }
 QStatusBar { background: #1b252d; color: #a8b5c0; border-top: 1px solid #303e48; padding: 4px 14px; }

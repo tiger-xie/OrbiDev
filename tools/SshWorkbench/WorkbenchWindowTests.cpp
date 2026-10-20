@@ -675,6 +675,114 @@ private slots:
         QVERIFY(window.m_projects->item(0)->text().contains(QStringLiteral("1 个标签")));
     }
 
+    void statusBannerVisualStates()
+    {
+        const auto outputDirectory = qEnvironmentVariable("ORBIDEV_UI07_SCREENSHOT");
+        if (outputDirectory.isEmpty())
+            QSKIP("仅在指定截图目录时运行真实控件视觉场景");
+        QVERIFY(QDir().mkpath(outputDirectory));
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        launcher::Project project{QStringLiteral("产品开发（预览）"), QStringLiteral("D:/Projects/Product"),
+                                  true, QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
+        window.m_state.hosts.front().name = QStringLiteral("家庭电脑（预览）");
+        window.m_state.projects.projects = {project};
+        window.renderHosts();
+        window.renderProjects();
+        auto *page = openPending(window, project);
+        auto *session = page->findChild<sshworkbench::SshSession *>();
+        auto *terminal = page->findChild<rad::client::TerminalView *>();
+        QSignalSpy ready(terminal, &rad::client::TerminalView::ready);
+        window.show();
+        QTRY_VERIFY_WITH_TIMEOUT(!ready.isEmpty(), 20000);
+        terminal->appendOutput(
+            QStringLiteral("[界面预览，未启动 SSH]\r\n历史终端输出保留在这里。\r\n").toUtf8());
+        const auto capture = [&](const QString &name)
+        {
+            QTest::qWait(150);
+            QVERIFY(window.grab().save(outputDirectory + QLatin1Char('/') + name + QStringLiteral(".png")));
+        };
+        capture(QStringLiteral("preparing"));
+        session->hostVerificationStarted();
+        capture(QStringLiteral("verifying"));
+        session->started();
+        capture(QStringLiteral("running"));
+        QCOMPARE(page->findChild<QScrollArea *>(QStringLiteral("terminalStatusDetails"))
+                     ->verticalScrollBar()
+                     ->maximum(),
+                 0);
+        session->exited(0);
+        capture(QStringLiteral("exited"));
+        session->errorOccurred(QStringLiteral("主机校验未完成。请检查连接配置与家庭电脑当前状态。"));
+        session->exited(255);
+        capture(QStringLiteral("failed"));
+        session->errorOccurred(
+            QStringLiteral("主机校验未完成。请检查连接配置与家庭电脑当前状态。") +
+            QStringLiteral("此处为较长诊断信息，用于检查自动换行和滚动，不代表真实连接结果。").repeated(8));
+        session->exited(255);
+        capture(QStringLiteral("failed-long"));
+        window.resize(920, 600);
+        capture(QStringLiteral("failed-narrow"));
+        auto *details = page->findChild<QScrollArea *>(QStringLiteral("terminalStatusDetails"));
+        QCOMPARE(details->horizontalScrollBar()->maximum(), 0);
+        QVERIFY(details->verticalScrollBar()->maximum() > 0);
+        QVERIFY(!session->isActive());
+    }
+
+    void bannerStatesAndHostSettingsAreAccurate()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        launcher::Project project{QStringLiteral("项目"), QStringLiteral("D:/Original"), true,
+                                  QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
+        window.m_state.projects.projects = {project};
+        const auto originalHost = window.m_state.hosts.front();
+        auto other = originalHost;
+        other.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        other.name = QStringLiteral("另一主机");
+        window.m_state.hosts.append(other);
+        auto *page = openPending(window, project);
+        auto *session = page->findChild<sshworkbench::SshSession *>();
+        auto *title = page->findChild<QLabel *>(QStringLiteral("terminalStatusTitle"));
+        QVERIFY(title);
+        QCOMPARE(title->text(), QStringLiteral("正在准备终端"));
+        session->hostVerificationStarted();
+        QCOMPARE(title->text(), QStringLiteral("正在校验主机"));
+        session->started();
+        QCOMPARE(title->text(), QStringLiteral("SSH 进程运行中"));
+        session->exited(255);
+        QCOMPARE(title->text(), QStringLiteral("SSH 已退出（退出码 255）"));
+        QVERIFY(!page->findChild<QLabel *>(QStringLiteral("terminalStatus"))
+                     ->text()
+                     .contains(QStringLiteral("认证失败")));
+        window.m_state.currentHostId = other.id;
+        auto *settings = page->findChild<QPushButton *>(QStringLiteral("terminalSettingsButton"));
+        QVERIFY(settings && !settings->isHidden());
+        QTimer::singleShot(50, &window,
+                           [&]
+                           {
+                               auto *dialog = window.findChild<QDialog *>(QStringLiteral("workbenchDialog"));
+                               QVERIFY(dialog);
+                               QCOMPARE(
+                                   dialog->findChild<QLineEdit *>(QStringLiteral("hostNameEdit"))->text(),
+                                   originalHost.name);
+                               dialog->reject();
+                           });
+        settings->click();
+        QCOMPARE(window.m_state.currentHostId, other.id);
+        window.m_state.hosts.removeFirst();
+        settings->click();
+        QVERIFY(window.m_feedback->text().contains(QStringLiteral("不存在")));
+        QCOMPARE(window.m_tabs->widget(0), page);
+        page->setProperty("terminalFailed", true);
+        session->exited(0);
+        QCOMPARE(title->text(), QStringLiteral("终端不可用"));
+    }
+
     void sshStatusExitReasonAndReconnectAreExplicit()
     {
         QTemporaryDir directory;
@@ -733,6 +841,18 @@ private slots:
         QObject::disconnect(terminal, nullptr, replacement, nullptr);
         QCOMPARE(replacement->property("sessionTarget").toStringList(), original);
         QVERIFY(replacement != page);
+        window.m_tabs->setCurrentWidget(page);
+        reconnect->click();
+        QCOMPARE(window.m_tabs->count(), 2);
+        QCOMPARE(window.m_tabs->currentWidget(), replacement);
+        replacement->findChild<sshworkbench::SshSession *>()->exited(0);
+        window.m_tabs->setCurrentWidget(page);
+        answerClosePrompt(QMessageBox::Yes);
+        reconnect->click();
+        QCOMPARE(window.m_tabs->count(), 3);
+        auto *third = window.m_tabs->currentWidget();
+        QObject::disconnect(third->findChild<rad::client::TerminalView *>(), nullptr, third, nullptr);
+        QCOMPARE(third->property("sessionTarget").toStringList(), original);
     }
 
     void closeCancellationPreservesExitAndLateSignalsDoNotReviveClosingTab()

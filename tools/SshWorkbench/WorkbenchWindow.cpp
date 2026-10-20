@@ -697,12 +697,12 @@ bool WorkbenchWindow::saveState(const WorkbenchState &state)
     return true;
 }
 
-void WorkbenchWindow::editHost(bool add)
+void WorkbenchWindow::editHost(bool add, const QString &hostId)
 {
     if (m_preview || !m_projectsReadable)
         return;
     HostProfile host;
-    const auto *current = findHost(m_state, m_state.currentHostId);
+    const auto *current = findHost(m_state, hostId.isEmpty() ? m_state.currentHostId : hostId);
     if (!add && m_setupRunning && current && current->id == m_setupHostId)
     {
         showFeedback(tr("当前主机的首次配置向导仍在运行，请完成或关闭向导后再编辑。"), true);
@@ -710,7 +710,10 @@ void WorkbenchWindow::editHost(bool add)
     }
     if (!add && !current)
     {
-        showFeedback(tr("请先添加家庭电脑。"));
+        showFeedback(hostId.isEmpty()
+                         ? tr("请先添加家庭电脑。")
+                         : tr("此标签的主机配置已不存在，请从设置添加主机；已有终端目标保持不变。"),
+                     true);
         return;
     }
     if (add)
@@ -724,7 +727,7 @@ void WorkbenchWindow::editHost(bool add)
     HostDialog dialog(host, this);
     dialog.setWindowTitle(add ? tr("添加家庭主机") : tr("编辑家庭主机"));
     dialog.setSaveHandler(
-        [this, add, host](const HostProfile &updated, QString &error)
+        [this, add, host, hostId](const HostProfile &updated, QString &error)
         {
             auto next = m_state;
             if (add)
@@ -733,7 +736,8 @@ void WorkbenchWindow::editHost(bool add)
                 for (auto &entry : next.hosts)
                     if (entry.id == host.id)
                         entry = updated;
-            next.currentHostId = host.id;
+            if (hostId.isEmpty())
+                next.currentHostId = host.id;
             if (saveState(next))
                 return true;
             error = m_feedback->text();
@@ -901,7 +905,50 @@ void WorkbenchWindow::updateTerminalLabel(QWidget *page)
                                                                  : page->property("sessionState").toString();
     m_tabs->setTabText(
         index, tr("%1 #%2 · %3").arg(name).arg(page->property("sessionNumber").toULongLong()).arg(state));
+    updateTerminalBanner(page);
     updateActiveSession();
+}
+
+void WorkbenchWindow::updateTerminalBanner(QWidget *page)
+{
+    auto *banner = page->findChild<QWidget *>(QStringLiteral("terminalBanner"));
+    if (!banner)
+        return;
+    auto *title = page->findChild<QLabel *>(QStringLiteral("terminalStatusTitle"));
+    auto *session = page->findChild<SshSession *>();
+    const bool exited = page->property("sessionExited").toBool();
+    const bool terminalFailed = page->property("terminalFailed").toBool();
+    const bool failed = terminalFailed || !page->property("sessionError").toString().isEmpty() ||
+                        (exited && page->property("sessionExitCode").toInt() != 0);
+    const bool closing = page->property("sessionClosing").toBool();
+    QString heading = page->property("sessionState").toString();
+    if (closing)
+        heading = tr("正在关闭 SSH");
+    else if (terminalFailed)
+        heading = tr("终端不可用");
+    else if (exited)
+        heading = tr("SSH 已退出（退出码 %1）").arg(page->property("sessionExitCode").toInt());
+    else if (failed)
+        heading = tr("SSH 出错");
+    else if (heading == tr("准备终端"))
+        heading = tr("正在准备终端");
+    else if (heading == tr("校验主机"))
+        heading = tr("正在校验主机");
+    else if (heading == tr("SSH 运行中"))
+        heading = tr("SSH 进程运行中");
+    title->setText(heading);
+    page->findChild<QScrollArea *>(QStringLiteral("terminalStatusDetails"))->setFixedHeight(failed ? 80 : 36);
+    banner->setProperty("error", failed);
+    banner->style()->unpolish(banner);
+    banner->style()->polish(banner);
+    title->style()->unpolish(title);
+    title->style()->polish(title);
+    page->findChild<QLabel *>(QStringLiteral("terminalStatusIcon"))->setVisible(failed);
+    page->findChild<QWidget *>(QStringLiteral("terminalStatusActions"))
+        ->setVisible(!closing && (failed || exited));
+    page->findChild<QPushButton *>(QStringLiteral("terminalSettingsButton"))->setVisible(failed);
+    page->findChild<QPushButton *>(QStringLiteral("reconnectTerminalButton"))
+        ->setVisible(!closing && (exited || terminalFailed) && (!session || !session->isActive()));
 }
 
 bool WorkbenchWindow::saveProjects(const launcher::Configuration &configuration)
@@ -1186,19 +1233,55 @@ void WorkbenchWindow::createTerminal(launcher::Project project, HostProfile host
     location->setToolTip(location->text());
     location->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     layout->addWidget(location);
-    auto *status = new QLabel(tr("正在准备终端…"), page);
+    auto *banner = new QWidget(page);
+    banner->setObjectName(QStringLiteral("terminalBanner"));
+    auto *bannerLayout = new QHBoxLayout(banner);
+    bannerLayout->setContentsMargins(20, 14, 20, 14);
+    bannerLayout->setSpacing(16);
+    auto *icon = new QLabel(banner);
+    icon->setObjectName(QStringLiteral("terminalStatusIcon"));
+    icon->setPixmap(QIcon(QStringLiteral(":/resources/icon/setup/error.svg")).pixmap(28, 28));
+    icon->setFixedSize(28, 28);
+    bannerLayout->addWidget(icon, 0, Qt::AlignTop);
+    auto *messageLayout = new QVBoxLayout;
+    messageLayout->setSpacing(8);
+    auto *title = new QLabel(banner);
+    title->setObjectName(QStringLiteral("terminalStatusTitle"));
+    title->setTextFormat(Qt::PlainText);
+    messageLayout->addWidget(title);
+    auto *status = new QLabel(tr("正在准备终端…"), banner);
     status->setObjectName(QStringLiteral("terminalStatus"));
     status->setTextFormat(Qt::PlainText);
     status->setWordWrap(true);
-    status->setContentsMargins(16, 10, 16, 10);
-    auto *statusRow = new QHBoxLayout;
-    statusRow->addWidget(status, 1);
-    auto *reconnect = new QPushButton(tr("重新连接…"), page);
+    status->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    status->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto *details = new QScrollArea(banner);
+    details->setObjectName(QStringLiteral("terminalStatusDetails"));
+    details->setWidgetResizable(true);
+    details->setFrameShape(QFrame::NoFrame);
+    details->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    details->setFixedHeight(36);
+    details->setWidget(status);
+    messageLayout->addWidget(details);
+    auto *actions = new QWidget(banner);
+    actions->setObjectName(QStringLiteral("terminalStatusActions"));
+    auto *actionsLayout = new QHBoxLayout(actions);
+    actionsLayout->setContentsMargins(0, 0, 0, 0);
+    actionsLayout->setSpacing(10);
+    auto *settings = new QPushButton(tr("打开连接设置"), actions);
+    settings->setObjectName(QStringLiteral("terminalSettingsButton"));
+    settings->setProperty("role", "primary");
+    settings->setToolTip(tr("编辑此标签所属主机；重新连接仍使用标签创建时的目标"));
+    actionsLayout->addWidget(settings);
+    auto *reconnect = new QPushButton(tr("重新连接…"), actions);
     reconnect->setObjectName(QStringLiteral("reconnectTerminalButton"));
     reconnect->setToolTip(tr("使用此标签创建时的主机与目录新建会话，不恢复原进程"));
-    reconnect->hide();
-    statusRow->addWidget(reconnect);
-    layout->addLayout(statusRow);
+    actionsLayout->addWidget(reconnect);
+    actionsLayout->addStretch();
+    messageLayout->addWidget(actions);
+    bannerLayout->addLayout(messageLayout, 1);
+    layout->addWidget(banner);
+    connect(settings, &QPushButton::clicked, page, [this, host] { editHost(false, host.id); });
     auto *terminal = new rad::client::TerminalView(page);
     terminal->setTerminalFontSize(m_terminalFontSize);
     layout->addWidget(terminal, 1);
@@ -1218,6 +1301,26 @@ void WorkbenchWindow::createTerminal(launcher::Project project, HostProfile host
             {
                 if (m_closing || m_closePromptActive || page->property("sessionClosing").toBool())
                     return;
+                // 旧失败页再次重连时复用同目标的准备中或运行中标签，不受之后修改的配置影响。
+                const auto target = page->property("sessionTarget").toStringList();
+                for (int index = m_tabs->count() - 1; index >= 0; --index)
+                {
+                    auto *candidate = m_tabs->widget(index);
+                    auto *candidateSession = candidate->findChild<SshSession *>();
+                    const auto candidateTarget = candidate->property("sessionTarget").toStringList();
+                    if (candidate == page || candidate->property("sessionClosing").toBool() ||
+                        candidate->property("terminalFailed").toBool() ||
+                        candidate->property("sessionExited").toBool() ||
+                        !std::equal(candidateTarget.cbegin(), candidateTarget.cend(), target.cbegin(),
+                                    target.cend()))
+                        continue;
+                    if (candidate->property("sessionPending").toBool() ||
+                        (candidateSession && candidateSession->isActive()))
+                    {
+                        m_tabs->setCurrentWidget(candidate);
+                        return;
+                    }
+                }
                 QScopedValueRollback<bool> confirming(m_closePromptActive, true);
                 if (QMessageBox::question(this, tr("重新连接：新建会话"),
                                           tr("将使用此标签创建时的目标新建 SSH 会话，不会恢复原进程。\n%1\n"
