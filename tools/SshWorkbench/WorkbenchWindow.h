@@ -11,6 +11,7 @@ class QListWidget;
 class QPushButton;
 class QStackedWidget;
 class QTabWidget;
+class QSplitter;
 
 namespace sshworkbench
 {
@@ -28,6 +29,11 @@ protected:
 private:
     friend class ::WorkbenchWindowTests;
     void buildUi();
+    void loadPreferences();
+    void fitWindowToScreens(QRect restored);
+    bool savePreferences();
+    void showAppearanceSettings();
+    void setTerminalFontSize(int size);
     void renderHosts();
     void editHost(bool add);
     void removeHost();
@@ -53,6 +59,14 @@ private:
     void showFeedback(const QString &message, bool error = false);
     void updateWorkspace();
 
+    QString m_preferencesPath;
+    bool m_preferencesWritable = true;
+    int m_terminalFontSize = 15;
+    QMap<QString, QString> m_recentProjects;
+    QSplitter *m_splitter = nullptr;
+    QPushButton *m_editProject = nullptr;
+    QPushButton *m_removeProject = nullptr;
+    QLabel *m_emptyHint = nullptr;
     QString m_profilePath;
     QString m_projectsPath;
     WorkbenchState m_state;

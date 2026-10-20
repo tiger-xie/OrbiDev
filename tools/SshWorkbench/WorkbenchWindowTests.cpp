@@ -3,12 +3,19 @@
 #include "WorkbenchWindow.h"
 #include "terminal/TerminalView.h"
 #include <QComboBox>
+#include <QDialog>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScreen>
+#include <QSpinBox>
+#include <QSplitter>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -55,6 +62,231 @@ private:
     }
 
 private slots:
+    void maximizedPreferenceKeepsNormalGeometry()
+    {
+        QTemporaryDir directory;
+        const auto profile = directory.filePath(QStringLiteral("profile.json"));
+        const auto projects = directory.filePath(QStringLiteral("projects.json"));
+        sshworkbench::WorkbenchWindow window(profile, projects);
+        window.show();
+        window.fitWindowToScreens(QRect(60, 60, 1000, 650));
+        const QRect normal = window.geometry();
+        window.showMaximized();
+        QTRY_VERIFY(window.isMaximized());
+        QVERIFY(window.close());
+        QFile saved(window.m_preferencesPath);
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        const auto settings = QJsonDocument::fromJson(saved.readAll()).object();
+        saved.close();
+        QVERIFY(settings.value(QStringLiteral("maximized")).toBool());
+        QCOMPARE(settings.value(QStringLiteral("width")).toInt(), normal.width());
+        QCOMPARE(settings.value(QStringLiteral("height")).toInt(), normal.height());
+        sshworkbench::WorkbenchWindow restored(profile, projects);
+        QVERIFY(restored.isMaximized());
+        restored.showNormal();
+        QTRY_COMPARE(restored.size(), normal.size());
+        QVERIFY(restored.close());
+    }
+
+    void failedPreferenceWriteIsReportedBeforeExit()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        QVERIFY(QDir().mkdir(window.m_preferencesPath));
+        bool reported = false;
+        QTimer::singleShot(0, &window,
+                           [&reported]
+                           {
+                               for (auto *widget : QApplication::topLevelWidgets())
+                                   if (auto *message = qobject_cast<QMessageBox *>(widget))
+                                   {
+                                       reported = message->windowTitle() == QStringLiteral("偏好未保存");
+                                       message->accept();
+                                   }
+                           });
+        QVERIFY(window.close());
+        QVERIFY(reported);
+        QVERIFY(QFileInfo(window.m_preferencesPath).isDir());
+    }
+
+    void preferencesRestoreWithoutStartingSessions()
+    {
+        QTemporaryDir directory;
+        const auto profile = directory.filePath(QStringLiteral("profile.json"));
+        const auto projects = directory.filePath(QStringLiteral("projects.json"));
+        sshworkbench::WorkbenchWindow window(profile, projects);
+        launcher::Project first{
+            QStringLiteral("同名"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        auto second = first;
+        second.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        bindProject(window, first);
+        bindProject(window, second);
+        window.m_state.projects.projects = {first, second};
+        QVERIFY(window.saveState(window.m_state));
+        window.renderProjects();
+        window.m_projects->setCurrentRow(1);
+        window.setTerminalFontSize(21);
+        window.resize(1100, 700);
+        window.fitWindowToScreens(window.geometry());
+        window.m_splitter->setSizes({320, 780});
+        QVERIFY(window.close());
+        sshworkbench::WorkbenchWindow restored(profile, projects);
+        QCOMPARE(restored.m_terminalFontSize, 21);
+        QCOMPARE(restored.projectRow(), 1);
+        QCOMPARE(restored.m_tabs->count(), 0);
+        QVERIFY(restored.findChildren<sshworkbench::SshSession *>().isEmpty());
+        QCOMPARE(restored.size(), window.size());
+        QCOMPARE(restored.m_splitter->sizes().front(), window.m_splitter->sizes().front());
+    }
+
+    void corruptPreferencesArePreservedAndPreviewDoesNotWrite()
+    {
+        QTemporaryDir directory;
+        const auto path = directory.filePath(QStringLiteral("projects.json.preferences.json"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{broken");
+        file.close();
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        QVERIFY(!window.m_preferencesWritable);
+        window.setTerminalFontSize(22);
+        QVERIFY(window.close());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), QByteArray("{broken"));
+        file.close();
+        sshworkbench::WorkbenchWindow preview(directory.filePath(QStringLiteral("profile.json")),
+                                              directory.filePath(QStringLiteral("projects.json")), {}, true);
+        QCOMPARE(preview.m_terminalFontSize, 15);
+        QVERIFY(preview.close());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), QByteArray("{broken"));
+    }
+
+    void offscreenPreferencesAreClampedAndUnknownVersionPreserved()
+    {
+        QTemporaryDir directory;
+        const auto profile = directory.filePath(QStringLiteral("profile.json"));
+        const auto projects = directory.filePath(QStringLiteral("projects.json"));
+        sshworkbench::WorkbenchWindow initial(profile, projects);
+        QVERIFY(initial.close());
+        QFile file(projects + QStringLiteral(".preferences.json"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        auto settings = QJsonDocument::fromJson(file.readAll()).object();
+        file.close();
+        settings.insert(QStringLiteral("x"), 90000);
+        settings.insert(QStringLiteral("y"), 90000);
+        settings.insert(QStringLiteral("width"), 20000);
+        settings.insert(QStringLiteral("height"), 20000);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(settings).toJson());
+        file.close();
+        sshworkbench::WorkbenchWindow restored(profile, projects);
+        QVERIFY(QGuiApplication::primaryScreen()->availableGeometry().contains(restored.geometry()));
+        settings.insert(QStringLiteral("version"), 99);
+        const auto bytes = QJsonDocument(settings).toJson();
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(bytes);
+        file.close();
+        sshworkbench::WorkbenchWindow unknown(profile, projects);
+        QVERIFY(!unknown.m_preferencesWritable);
+        QVERIFY(unknown.close());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), bytes);
+    }
+
+    void globalFontAppliesToExistingAndNewTerminalsAndCloseCancelDoesNotSave()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        QVERIFY(window.savePreferences());
+        QFile file(window.m_preferencesPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto original = file.readAll();
+        file.close();
+        launcher::Project project{
+            QStringLiteral("项目"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
+        auto *first = openPending(window, project);
+        window.setTerminalFontSize(25);
+        auto *second = openPending(window, project, true);
+        QCOMPARE(first->findChild<rad::client::TerminalView *>()->terminalFontSize(), 25);
+        QCOMPARE(second->findChild<rad::client::TerminalView *>()->terminalFontSize(), 25);
+        answerClosePrompt(QMessageBox::No);
+        QVERIFY(!window.close());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), original);
+    }
+
+    void recentProjectsAreRememberedSeparatelyPerHost()
+    {
+        QTemporaryDir directory;
+        const auto profile = directory.filePath(QStringLiteral("profile.json"));
+        const auto projects = directory.filePath(QStringLiteral("projects.json"));
+        sshworkbench::WorkbenchWindow window(profile, projects);
+        launcher::Project first{
+            QStringLiteral("同名"), {}, true, QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        auto second = first;
+        second.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        auto third = first;
+        third.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        bindProject(window, first);
+        bindProject(window, second);
+        auto otherHost = window.m_state.hosts.front();
+        otherHost.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        window.m_state.hosts.append(otherHost);
+        window.m_state.projectHosts.insert(third.id, otherHost.id);
+        window.m_state.projects.projects = {first, second, third};
+        QVERIFY(window.saveState(window.m_state));
+        window.renderHosts();
+        window.renderProjects();
+        window.m_projects->setCurrentRow(1);
+        window.m_hostSelector->setCurrentIndex(1);
+        QCOMPARE(window.projectRow(), 2);
+        window.m_hostSelector->setCurrentIndex(0);
+        QCOMPARE(window.projectRow(), 1);
+        QVERIFY(window.close());
+        sshworkbench::WorkbenchWindow restored(profile, projects);
+        QCOMPARE(restored.projectRow(), 1);
+        restored.m_hostSelector->setCurrentIndex(1);
+        QCOMPARE(restored.projectRow(), 2);
+        QCOMPARE(restored.m_tabs->count(), 0);
+    }
+
+    void appearanceCancelAndConfirm()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        window.show();
+        for (bool accept : {false, true})
+        {
+            QTimer::singleShot(0, &window,
+                               [accept]
+                               {
+                                   for (auto *widget : QApplication::topLevelWidgets())
+                                       if (auto *dialog = qobject_cast<QDialog *>(widget))
+                                           if (dialog->objectName() == QStringLiteral("appearanceDialog"))
+                                           {
+                                               auto *font = dialog->findChild<QSpinBox *>(
+                                                   QStringLiteral("terminalFontSize"));
+                                               QVERIFY(font);
+                                               font->setValue(23);
+                                               const auto screenshot =
+                                                   qEnvironmentVariable("ORBIDEV_APPEARANCE_SCREENSHOT");
+                                               if (!screenshot.isEmpty())
+                                                   QVERIFY(dialog->grab().save(screenshot));
+                                               accept ? dialog->accept() : dialog->reject();
+                                           }
+                               });
+            window.showAppearanceSettings();
+            QCOMPARE(window.m_terminalFontSize, accept ? 23 : 15);
+        }
+        QVERIFY(window.close());
+    }
+
     void projectCountsSelectionAndNamesFollowTabs()
     {
         QTemporaryDir directory;

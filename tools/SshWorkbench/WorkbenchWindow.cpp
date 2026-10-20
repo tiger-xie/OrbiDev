@@ -3,6 +3,7 @@
 #include "SshSession.h"
 #include "terminal/TerminalView.h"
 
+#include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -13,6 +14,8 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -21,9 +24,12 @@
 #include <QPointer>
 #include <QProcess>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QScopedValueRollback>
+#include <QScreen>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -45,7 +51,9 @@ WorkbenchWindow::WorkbenchWindow(const QString &profilePath, const QString &proj
     resize(1280, 820);
     setMinimumSize(920, 600);
     m_statePath = m_projectsPath + QStringLiteral(".workbench.json");
+    m_preferencesPath = m_projectsPath + QStringLiteral(".preferences.json");
     buildUi();
+    fitWindowToScreens(geometry());
     if (m_preview)
     {
         m_state.projects.projects = {{tr("产品开发"), QStringLiteral("D:/Projects/Product"), true},
@@ -59,8 +67,164 @@ WorkbenchWindow::WorkbenchWindow(const QString &profilePath, const QString &proj
         renderHosts();
         reloadProfile();
     }
+    if (!m_preview)
+        loadPreferences();
     renderProjects();
     updateWorkspace();
+}
+
+void WorkbenchWindow::loadPreferences()
+{
+    QFile file(m_preferencesPath);
+    if (!file.exists())
+        return;
+    QJsonParseError error;
+    QJsonObject settings;
+    if (file.open(QIODevice::ReadOnly) && file.size() <= 65536)
+    {
+        const auto document = QJsonDocument::fromJson(file.readAll(), &error);
+        if (error.error == QJsonParseError::NoError && document.isObject())
+            settings = document.object();
+    }
+    const auto integer = [&settings](const QString &key, int minimum, int maximum)
+    {
+        const auto value = settings.value(key);
+        return value.isDouble() && value.toDouble() == value.toInt() && value.toInt() >= minimum &&
+               value.toInt() <= maximum;
+    };
+    bool valid =
+        integer(QStringLiteral("version"), 1, 1) && integer(QStringLiteral("fontSize"), 10, 30) &&
+        integer(QStringLiteral("railWidth"), 230, 32768) && integer(QStringLiteral("x"), -1000000, 1000000) &&
+        integer(QStringLiteral("y"), -1000000, 1000000) && integer(QStringLiteral("width"), 1, 32768) &&
+        integer(QStringLiteral("height"), 1, 32768) && settings.value(QStringLiteral("maximized")).isBool() &&
+        settings.value(QStringLiteral("recentProjects")).isObject();
+    const auto recent = settings.value(QStringLiteral("recentProjects")).toObject();
+    for (auto entry = recent.begin(); entry != recent.end(); ++entry)
+        valid = valid && !entry.key().isEmpty() && entry.value().isString();
+    if (!valid)
+    {
+        m_preferencesWritable = false;
+        showFeedback(tr("外观偏好无法读取或版本不支持，本次使用默认值并保留原文件；修复该文件后重启工作台。"),
+                     true);
+        return;
+    }
+    for (auto entry = recent.begin(); entry != recent.end(); ++entry)
+        m_recentProjects.insert(entry.key(), entry.value().toString());
+    setTerminalFontSize(settings.value(QStringLiteral("fontSize")).toInt());
+    QRect restored(settings.value(QStringLiteral("x")).toInt(), settings.value(QStringLiteral("y")).toInt(),
+                   settings.value(QStringLiteral("width")).toInt(),
+                   settings.value(QStringLiteral("height")).toInt());
+    fitWindowToScreens(restored);
+    m_splitter->setSizes({settings.value(QStringLiteral("railWidth")).toInt(),
+                          qMax(1, width() - settings.value(QStringLiteral("railWidth")).toInt())});
+    if (settings.value(QStringLiteral("maximized")).toBool())
+        setWindowState(windowState() | Qt::WindowMaximized);
+}
+
+void WorkbenchWindow::fitWindowToScreens(QRect restored)
+{
+    auto *target = QGuiApplication::primaryScreen();
+    int largestIntersection = 0;
+    for (auto *screen : QGuiApplication::screens())
+    {
+        const auto overlap = screen->availableGeometry().intersected(restored);
+        const int area = overlap.width() * overlap.height();
+        if (area > largestIntersection)
+        {
+            largestIntersection = area;
+            target = screen;
+        }
+    }
+    if (target)
+    {
+        // 为系统标题栏和窗口边框留出余量；缩放或移除显示器后不把窗口留在屏幕外。
+        const auto available = target->availableGeometry().adjusted(12, 40, -12, -12);
+        if (available.width() <= 0 || available.height() <= 0)
+            return;
+        setMinimumSize(qMin(920, available.width()), qMin(600, available.height()));
+        restored.setSize(restored.size().expandedTo(minimumSize()).boundedTo(available.size()));
+        restored.moveLeft(
+            qBound(available.left(), restored.left(), available.right() - restored.width() + 1));
+        restored.moveTop(qBound(available.top(), restored.top(), available.bottom() - restored.height() + 1));
+    }
+    setGeometry(restored);
+}
+
+bool WorkbenchWindow::savePreferences()
+{
+    if (m_preview)
+        return true;
+    if (!m_preferencesWritable)
+    {
+        showFeedback(tr("外观仅在本次生效：原偏好文件无法读取，未覆盖该文件。"), true);
+        return false;
+    }
+    const QRect normal = isMaximized() || isMinimized() ? normalGeometry() : geometry();
+    QJsonObject recent;
+    for (auto entry = m_recentProjects.cbegin(); entry != m_recentProjects.cend(); ++entry)
+        recent.insert(entry.key(), entry.value());
+    const QJsonObject settings{{QStringLiteral("version"), 1},
+                               {QStringLiteral("fontSize"), m_terminalFontSize},
+                               {QStringLiteral("railWidth"), qBound(230, m_splitter->sizes().front(), 32768)},
+                               {QStringLiteral("x"), normal.x()},
+                               {QStringLiteral("y"), normal.y()},
+                               {QStringLiteral("width"), normal.width()},
+                               {QStringLiteral("height"), normal.height()},
+                               {QStringLiteral("maximized"), isMaximized()},
+                               {QStringLiteral("recentProjects"), recent}};
+    QSaveFile file(m_preferencesPath);
+    const auto bytes = QJsonDocument(settings).toJson();
+    if (!QDir().mkpath(QFileInfo(m_preferencesPath).absolutePath()) || !file.open(QIODevice::WriteOnly) ||
+        file.write(bytes) != bytes.size() || !file.commit())
+    {
+        showFeedback(tr("外观偏好未保存：%1").arg(file.errorString()), true);
+        return false;
+    }
+    return true;
+}
+
+void WorkbenchWindow::setTerminalFontSize(int size)
+{
+    m_terminalFontSize = qBound(10, size, 30);
+    for (auto *terminal : findChildren<rad::client::TerminalView *>())
+        terminal->setTerminalFontSize(m_terminalFontSize);
+}
+
+void WorkbenchWindow::showAppearanceSettings()
+{
+    if (m_preview || m_closing)
+        return;
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("appearanceDialog"));
+    dialog.setWindowTitle(tr("工作台外观"));
+    dialog.setMinimumWidth(430);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+    form->addRow(tr("主题"), new QLabel(tr("石墨灰／青绿（深色）"), &dialog));
+    auto *fontSize = new QSpinBox(&dialog);
+    fontSize->setObjectName(QStringLiteral("terminalFontSize"));
+    fontSize->setRange(10, 30);
+    fontSize->setValue(m_terminalFontSize);
+    form->addRow(tr("终端字号"), fontSize);
+    layout->addLayout(form);
+    auto *hint = new QLabel(tr("应用于所有已有和新建终端。\nCtrl+- / Ctrl+= 也会调整并保存全局字号。\n复制 "
+                               "Ctrl+Shift+C；粘贴 Ctrl+V / Ctrl+Shift+V。"),
+                            &dialog);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("保存"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    fontSize->setFocus();
+    if (dialog.exec() == QDialog::Accepted)
+    {
+        setTerminalFontSize(fontSize->value());
+        if (savePreferences())
+            showFeedback(tr("外观偏好已保存，字号已应用于全部终端。"));
+    }
 }
 
 void WorkbenchWindow::buildUi()
@@ -118,6 +282,11 @@ void WorkbenchWindow::buildUi()
     hostMenu->addAction(tr("移除当前主机…"), this, &WorkbenchWindow::removeHost);
     settings->setMenu(hostMenu);
     toolbar->addWidget(settings);
+    auto *appearance = new QPushButton(tr("外观…"), central);
+    appearance->setObjectName(QStringLiteral("appearanceSettingsButton"));
+    appearance->setEnabled(!m_preview);
+    connect(appearance, &QPushButton::clicked, this, &WorkbenchWindow::showAppearanceSettings);
+    toolbar->addWidget(appearance);
     for (int delta : {-1, 1})
     {
         auto *zoom = new QPushButton(delta < 0 ? tr("A−") : tr("A+"), central);
@@ -126,10 +295,10 @@ void WorkbenchWindow::buildUi()
         zoom->setEnabled(!m_preview);
         const auto applyZoom = [this, delta]
         {
-            QWidget *page = m_tabs->currentWidget();
-            if (page)
-                if (auto *terminal = page->findChild<rad::client::TerminalView *>())
-                    terminal->zoomBy(delta);
+            if (m_preview || m_closing)
+                return;
+            setTerminalFontSize(m_terminalFontSize + delta);
+            savePreferences();
         };
         connect(zoom, &QPushButton::clicked, this, applyZoom);
         auto *shortcut = new QShortcut(
@@ -151,6 +320,8 @@ void WorkbenchWindow::buildUi()
     m_feedback->hide();
     root->addWidget(m_feedback);
     auto *splitter = new QSplitter(central);
+    m_splitter = splitter;
+    splitter->setChildrenCollapsible(false);
     auto *rail = new QWidget(splitter);
     rail->setObjectName(QStringLiteral("projectRail"));
     rail->setMinimumWidth(230);
@@ -176,13 +347,26 @@ void WorkbenchWindow::buildUi()
                 next.projects[item->data(Qt::UserRole).toInt()].enabled = item->checkState() == Qt::Checked;
                 if (!saveProjects(next))
                     renderProjects();
+                updateWorkspace();
             });
     connect(m_projects, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { openCurrent(); });
+    connect(m_projects, &QListWidget::currentRowChanged, this,
+            [this]
+            {
+                if (m_renderingProjects)
+                    return;
+                const int row = projectRow();
+                if (!m_preview && row >= 0)
+                    m_recentProjects.insert(m_state.currentHostId, m_state.projects.projects[row].id);
+                updateWorkspace();
+            });
     auto *actions = new QHBoxLayout;
     auto *add = new QPushButton(tr("添加"), rail);
     add->setObjectName(QStringLiteral("addProjectButton"));
     auto *edit = new QPushButton(tr("编辑"), rail);
     auto *remove = new QPushButton(tr("移除"), rail);
+    m_editProject = edit;
+    m_removeProject = remove;
     for (auto *button : {add, edit, remove})
     {
         button->setProperty("role", "compact");
@@ -209,6 +393,7 @@ void WorkbenchWindow::buildUi()
     auto *emptyHint = new QLabel(
         tr("添加家庭电脑上的项目目录，再打开终端。\n每个标签页是独立的 SSH 会话，Claude 在家庭电脑上运行。"),
         empty);
+    m_emptyHint = emptyHint;
     emptyHint->setAlignment(Qt::AlignCenter);
     emptyHint->setWordWrap(true);
     emptyHint->setProperty("role", "muted");
@@ -254,6 +439,17 @@ void WorkbenchWindow::buildUi()
     statusBar()->addPermanentWidget(new QLabel(tr("关闭客户端将断开 SSH · 不保证任务继续运行"), this));
     setCentralWidget(central);
     settings->setEnabled(!m_preview);
+    setTabOrder(m_hostSelector, settings);
+    setTabOrder(settings, appearance);
+    setTabOrder(appearance, m_newTerminal);
+    setTabOrder(m_newTerminal, m_projects);
+    setTabOrder(m_projects, add);
+    setTabOrder(add, edit);
+    setTabOrder(edit, remove);
+    setTabOrder(remove, m_openSelected);
+    m_tabs->setToolTip(tr(
+        "复制 Ctrl+Shift+C；粘贴 Ctrl+V / Ctrl+Shift+V；字号 Ctrl+- / Ctrl+=。Tab 在终端中交给远程程序。"));
+    m_newTerminal->setToolTip(tr("先选择项目，再额外创建 SSH 会话；双击项目会复用已有终端"));
 }
 
 void WorkbenchWindow::renderHosts()
@@ -424,7 +620,7 @@ void WorkbenchWindow::removeHost()
 void WorkbenchWindow::renderProjects()
 {
     m_renderingProjects = true;
-    const int previous = m_projects->currentRow();
+    const QString previous = m_recentProjects.value(m_state.currentHostId);
     m_projects->clear();
     for (int row = 0; row < m_state.projects.projects.size(); ++row)
     {
@@ -442,9 +638,17 @@ void WorkbenchWindow::renderProjects()
         item->setToolTip(project.directory);
     }
     if (m_projects->count() > 0)
-        m_projects->setCurrentRow(qBound(0, previous, m_projects->count() - 1));
+    {
+        int selected = 0;
+        for (int row = 0; row < m_projects->count(); ++row)
+            if (m_state.projects.projects[m_projects->item(row)->data(Qt::UserRole).toInt()].id == previous)
+                selected = row;
+        m_projects->setCurrentRow(selected);
+        if (!m_preview)
+            m_recentProjects.insert(m_state.currentHostId, m_state.projects.projects[projectRow()].id);
+    }
     m_renderingProjects = false;
-    updateProjectLabels();
+    updateWorkspace();
     for (int index = 0; index < m_tabs->count(); ++index)
         updateTerminalLabel(m_tabs->widget(index));
 }
@@ -731,6 +935,7 @@ void WorkbenchWindow::createTerminal(launcher::Project project, HostProfile host
     statusRow->addWidget(reconnect);
     layout->addLayout(statusRow);
     auto *terminal = new rad::client::TerminalView(page);
+    terminal->setTerminalFontSize(m_terminalFontSize);
     layout->addWidget(terminal, 1);
     auto *session = new SshSession(page);
     const QString directory = project.directory;
@@ -938,6 +1143,9 @@ void WorkbenchWindow::closeEvent(QCloseEvent *event)
     }
     if (!active)
     {
+        if (!savePreferences() && m_preferencesWritable)
+            QMessageBox::warning(this, tr("偏好未保存"),
+                                 tr("本次窗口布局和最近选择未能保存，旧偏好已保留。\n工作台仍将退出。"));
         event->accept();
         return;
     }
@@ -1061,10 +1269,22 @@ void WorkbenchWindow::updateWorkspace()
     updateProjectLabels();
     m_workspace->setCurrentIndex(m_tabs->count() == 0 ? 0 : 1);
     m_summary->setText(m_tabs->count() == 0 ? tr("没有活动终端") : tr("%1 个终端标签").arg(m_tabs->count()));
-    if (m_preview)
-    {
-        m_openSelected->setEnabled(false);
-        m_newTerminal->setEnabled(false);
-    }
+    const bool editable = !m_preview && !m_closing && m_projectsReadable;
+    const bool selected = projectRow() >= 0;
+    m_editProject->setEnabled(editable && selected);
+    m_removeProject->setEnabled(editable && selected);
+    m_newTerminal->setEnabled(editable && m_profileReady && selected);
+    bool checked = false;
+    for (int row = 0; row < m_projects->count(); ++row)
+        checked = checked || m_projects->item(row)->checkState() == Qt::Checked;
+    m_openSelected->setEnabled(editable && m_profileReady && checked);
+    m_emptyHint->setText(
+        !m_projectsReadable ? tr("配置读取失败，请先处理上方提示。原配置文件不会被覆盖。")
+        : !m_profileReady
+            ? tr("从“连接设置”添加家庭电脑或运行首次配置向导。\n配置完成后，添加项目并打开终端。")
+        : m_projects->count() == 0
+            ? tr("此主机尚无项目。点击左下方“添加”，填写家庭电脑上的项目目录。")
+            : tr("双击左侧项目打开终端，或勾选后批量打开。\n重启工作台只恢复选择，不会自动启动 "
+                 "Claude。\n复制 Ctrl+Shift+C · 粘贴 Ctrl+V · 字号 Ctrl+- / Ctrl+="));
 }
 }

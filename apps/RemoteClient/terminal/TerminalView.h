@@ -25,6 +25,9 @@ public:
     void setInputEnabled(bool enabled);
     void focusTerminal();
     void zoomBy(int delta);
+    // 字号限制为 10～30；页面未就绪时缓存，在初始化后应用，不启用终端输入。
+    void setTerminalFontSize(int size);
+    int terminalFontSize() const;
     QWebEngineView *webView() const;
 
 signals:
@@ -48,6 +51,7 @@ private:
     bool m_replayingBatch = false;
     int m_columns = 80;
     int m_rows = 24;
+    int m_terminalFontSize = 15;
     bool m_ready = false;
     bool m_failed = false;
     bool m_inputEnabled = false;

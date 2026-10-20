@@ -129,6 +129,7 @@ TerminalView::TerminalView(QWidget *parent) : QWidget(parent)
                     return;
                 m_ready = true;
                 m_timeout->stop();
+                setTerminalFontSize(m_terminalFontSize);
                 emit m_bridge->inputState(m_inputEnabled);
                 emit ready();
                 if (m_inputEnabled)
@@ -252,8 +253,20 @@ void TerminalView::focusTerminal()
 
 void TerminalView::zoomBy(int delta)
 {
+    setTerminalFontSize(m_terminalFontSize + qBound(-10, delta, 10));
+}
+
+void TerminalView::setTerminalFontSize(int size)
+{
+    m_terminalFontSize = qBound(10, size, 30);
     if (m_ready && !m_failed)
-        m_view->page()->runJavaScript(QStringLiteral("clientTerminal.zoom(%1)").arg(qBound(-10, delta, 10)));
+        m_view->page()->runJavaScript(
+            QStringLiteral("clientTerminal.setFontSize(%1)").arg(m_terminalFontSize));
+}
+
+int TerminalView::terminalFontSize() const
+{
+    return m_terminalFontSize;
 }
 
 QWebEngineView *TerminalView::webView() const

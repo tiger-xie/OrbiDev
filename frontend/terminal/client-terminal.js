@@ -20,8 +20,10 @@
   let bridge = null;
   const api = window.clientTerminal = {
     term: term,
-    zoom: function (delta) {
-      term.options.fontSize = Math.max(10, Math.min(30, term.options.fontSize + delta));
+    setFontSize: function (size) {
+      const boundedSize = Math.max(10, Math.min(30, size));
+      if (term.options.fontSize === boundedSize) return;
+      term.options.fontSize = boundedSize;
       fit.fit();
     }
   };

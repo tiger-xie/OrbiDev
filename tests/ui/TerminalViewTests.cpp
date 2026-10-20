@@ -44,6 +44,7 @@ class TerminalViewTests final : public QObject
 private slots:
     void rendersRawUtf8AndAnsi();
     void gatesInputAndResizes();
+    void fontSizeSurvivesInitializationAndIsBounded();
     void clipboardAndNavigation();
     void rejectsOutputOverflow();
     void replayDoesNotAnswerHistoricalQueries();
@@ -51,6 +52,30 @@ private slots:
     void destructionCancelsPendingWork();
     void synchronousWindowSetupDoesNotConsumeLoadDeadline();
 };
+
+void TerminalViewTests::fontSizeSurvivesInitializationAndIsBounded()
+{
+    TerminalView view;
+    view.setTerminalFontSize(22);
+    QCOMPARE(view.terminalFontSize(), 22);
+    QSignalSpy ready(&view, &TerminalView::ready);
+    QSignalSpy failed(&view, &TerminalView::failed);
+    view.resize(800, 480);
+    view.show();
+    QTRY_VERIFY_WITH_TIMEOUT(!ready.isEmpty() || !failed.isEmpty(), 20000);
+    QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+    QTRY_COMPARE(evaluate(view, QStringLiteral("clientTerminal.term.options.fontSize")).toInt(), 22);
+    view.setTerminalFontSize(999);
+    QCOMPARE(view.terminalFontSize(), 30);
+    QTRY_COMPARE(evaluate(view, QStringLiteral("clientTerminal.term.options.fontSize")).toInt(), 30);
+    view.setTerminalFontSize(-1);
+    QCOMPARE(view.terminalFontSize(), 10);
+    QTRY_COMPARE(evaluate(view, QStringLiteral("clientTerminal.term.options.fontSize")).toInt(), 10);
+    view.zoomBy(3);
+    QCOMPARE(view.terminalFontSize(), 13);
+    QTRY_COMPARE(evaluate(view, QStringLiteral("clientTerminal.term.options.fontSize")).toInt(), 13);
+    QVERIFY(evaluate(view, QStringLiteral("clientTerminal.term.options.disableStdin")).toBool());
+}
 
 void TerminalViewTests::replayDoesNotAnswerHistoricalQueries()
 {
