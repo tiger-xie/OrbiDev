@@ -5,6 +5,7 @@
 #include <QMainWindow>
 
 class WorkbenchWindowTests;
+class QAction;
 class QComboBox;
 class QLabel;
 class QListWidget;
@@ -22,6 +23,9 @@ class WorkbenchWindow final : public QMainWindow
 public:
     explicit WorkbenchWindow(const QString &profilePath, const QString &projectsPath,
                              const QString &legacyPath = {}, bool preview = false, QWidget *parent = nullptr);
+
+    // 仅用于无副作用截图，不创建终端后端或读取连接凭据。
+    void showPreviewTabs();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -58,14 +62,15 @@ private:
     bool applySetupProfile(const QString &hostId, const sshsetup::ConnectionProfile &profile, bool adding);
     void showFeedback(const QString &message, bool error = false);
     void updateWorkspace();
+    void updateActiveSession();
 
     QString m_preferencesPath;
     bool m_preferencesWritable = true;
     int m_terminalFontSize = 15;
     QMap<QString, QString> m_recentProjects;
     QSplitter *m_splitter = nullptr;
-    QPushButton *m_editProject = nullptr;
-    QPushButton *m_removeProject = nullptr;
+    QAction *m_editProject = nullptr;
+    QAction *m_removeProject = nullptr;
     QLabel *m_emptyHint = nullptr;
     QString m_profilePath;
     QString m_projectsPath;

@@ -1,0 +1,43 @@
+适用于 .NET Framework MSBuild 版本 17.14.18+a338add32
+
+  Automatic MOC for target SshSetupCore
+  Automatic MOC for target FakeCli
+  Automatic MOC for target WorkbenchPty
+  FakeCli.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\FakeCli.exe
+  WorkbenchPty.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchPty.lib
+  SshSetupCore.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\SshSetupCore.lib
+  Automatic MOC for target AuthorizationServiceTests
+  Automatic MOC for target SshSetupUi
+  Automatic MOC for target EnvironmentServiceTests
+  AuthorizationServiceTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\AuthorizationServiceTests.exe
+  EnvironmentServiceTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\EnvironmentServiceTests.exe
+  Automatic MOC for target IdentityServiceTests
+  SshSetupUi.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\SshSetupUi.lib
+  Automatic MOC for target SetupWindowTests
+  Automatic MOC for target WindowFrameTests
+  IdentityServiceTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\IdentityServiceTests.exe
+  Automatic MOC for target WorkbenchCore
+  Automatic MOC for target OrbiDevSetup
+  WindowFrameTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\WindowFrameTests.exe
+  SetupWindowTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\SetupWindowTests.exe
+  OrbiDevSetup.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\OrbiDevSetup.exe
+  WorkbenchCore.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchCore.lib
+  Automatic MOC for target OrbiDevHomeSetup
+  OrbiDevHomeSetup.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\OrbiDevHomeSetup.exe
+  Automatic MOC for target WorkbenchUi
+  WorkbenchWindow.cpp
+  WorkbenchUi.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchUi.lib
+  Automatic MOC for target WorkbenchWindowTests
+  Automatic MOC for target HostDialogTests
+  Automatic MOC for target OrbiDevWorkbench
+  Automatic MOC for target WorkbenchStoreTests
+  Automatic MOC for target ProjectConfigurationTests
+  Automatic MOC for target WorkbenchTerminalTests
+  ProjectConfigurationTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\ProjectConfigurationTests.exe
+  WorkbenchStoreTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchStoreTests.exe
+  WorkbenchTerminalTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchTerminalTests.exe
+  Automatic MOC for target SshSessionTests
+  HostDialogTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\HostDialogTests.exe
+  WorkbenchWindowTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchWindowTests.exe
+  OrbiDevWorkbench.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\OrbiDevWorkbench.exe
+  SshSessionTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\SshSessionTests.exe

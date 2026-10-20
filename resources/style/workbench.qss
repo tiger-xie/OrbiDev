@@ -1,19 +1,40 @@
-/* 仅工作台区域采用紧凑视觉，保留列表的原生键盘焦点。 */
+/* 工作台以终端画布为主，导航与工具栏使用同一石墨层级。 */
 QWidget#workbench { background: #141b21; }
-QWidget#projectRail { background: #1d2730; border-right: 1px solid #34424e; }
+QWidget#workbenchToolbar { background: #192229; border-bottom: 1px solid #303e48; }
+QComboBox#hostSelector { background: transparent; border: none; border-right: 1px solid #34424e; border-radius: 0; padding: 8px 18px 8px 0; }
+QComboBox#hostSelector:focus { border-bottom: 1px solid #00b7b5; }
+QLabel#hostSummary { color: #b9c9d2; padding-left: 4px; }
+QPushButton#connectionSettingsButton { background: transparent; border: 1px solid transparent; padding: 9px 16px; min-width: 66px; }
+QPushButton#connectionSettingsButton:hover, QPushButton#connectionSettingsButton:pressed { background: #273943; }
+QPushButton#connectionSettingsButton:focus { border-color: #83f0ea; }
+QWidget#projectRail { background: #1b252d; border-right: 1px solid #303e48; }
+QPushButton#addProjectButton { padding: 3px; background: #2c3943; border: none; border-radius: 4px; }
+QPushButton#addProjectButton:hover { background: #3b515e; }
+QPushButton#openSelectedButton { background: transparent; color: #36d4ce; border-color: #008985; padding: 12px; }
+QPushButton#openSelectedButton:hover { background: #213e47; }
+QPushButton#openSelectedButton:disabled { color: #96a5af; border-color: #465560; }
 QListWidget#projectList { background: transparent; border: none; selection-color: #ffffff; }
-QListWidget#projectList::item { padding: 12px 8px; margin: 2px 0; border-left: 3px solid transparent; }
+QListWidget#projectList::item { padding: 8px 16px; margin: 0; border-left: 3px solid transparent; }
 QListWidget#projectList::item:hover { background: #273943; }
-QListWidget#projectList::item:selected { background: #213e47; border-left-color: #00b7b5; }
+QListWidget#projectList::item:selected { background: #213a43; border-left-color: #00b7b5; }
+QListWidget#projectList::item:focus { border-top: 1px solid #56868d; border-bottom: 1px solid #56868d; }
 QTabWidget#terminalTabs::pane { border: none; background: #0c1013; }
-QTabWidget#terminalTabs QTabBar::tab { background: #1d2730; padding: 12px 18px; border-bottom: 2px solid transparent; }
-QTabWidget#terminalTabs QTabBar::tab:hover { background: #2b3a45; }
-QTabWidget#terminalTabs QTabBar::tab:selected { background: #0c1013; border-bottom-color: #00b7b5; }
+QTabWidget#terminalTabs QTabBar { background: #11181e; border-top: 1px solid #303e48; }
+QTabWidget#terminalTabs QTabBar::tab { background: #141d24; padding: 13px 18px; margin-top: 4px; border: 1px solid #303e48; border-bottom: none; border-top-left-radius: 5px; border-top-right-radius: 5px; min-width: 100px; max-width: 240px; }
+QTabWidget#terminalTabs QTabBar::tab:hover { background: #24333e; }
+QTabWidget#terminalTabs QTabBar::tab:selected { background: #1b252d; border-top-color: #00b7b5; border-left-color: #00b7b5; }
+QTabWidget#terminalTabs QTabBar::close-button { image: url(:/resources/icon/window/close.svg); width: 16px; height: 16px; }
+QTabWidget#terminalTabs QTabBar::close-button:hover { background: #40515c; }
 QTabWidget#terminalTabs QTabBar::tab:disabled { color: #96a5af; }
 QPushButton[role="compact"] { padding: 7px 10px; }
-QLabel#workspaceEmptyTitle { font-size: 22px; font-weight: 600; }
-QLabel#terminalStatus { color: #a8b5c0; padding: 8px 12px; }
-QSplitter::handle { background: #34424e; }
+QLabel#workspaceEmptyTitle { font-size: 24px; font-weight: 600; padding-bottom: 12px; }
+QLabel#terminalLocation { background: #1b252d; color: #a8b5c0; padding: 12px 18px; border-bottom: 1px solid #34424e; }
+QLabel#terminalStatus { color: #a8b5c0; padding: 6px 12px; }
+QSplitter::handle { background: #303e48; width: 1px; }
 QSplitter::handle:hover { background: #00b7b5; }
-QStatusBar { background: #1d2730; color: #a8b5c0; border-top: 1px solid #34424e; }
+QStatusBar { background: #1b252d; color: #a8b5c0; border-top: 1px solid #303e48; padding: 4px 14px; }
 QStatusBar::item { border: none; }
+QLabel#workbenchShortcuts { color: #a8b5c0; padding-right: 12px; }
+QPushButton#sessionHelpButton { color: #a8b5c0; background: transparent; border: none; border-left: 1px solid #34424e; border-radius: 0; padding: 4px 10px; }
+QPushButton#sessionHelpButton:hover { color: #36d4ce; }
+QLabel#terminalPreview { background: #0c1013; color: #a8b5c0; }

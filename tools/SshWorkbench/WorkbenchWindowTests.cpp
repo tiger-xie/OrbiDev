@@ -2,6 +2,7 @@
 #include "SshSession.h"
 #include "WorkbenchWindow.h"
 #include "terminal/TerminalView.h"
+#include <QAction>
 #include <QComboBox>
 #include <QDialog>
 #include <QDir>
@@ -11,11 +12,15 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPushButton>
 #include <QScreen>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -62,6 +67,131 @@ private:
     }
 
 private slots:
+    void settingsPopupStaysInsideWindowAndBelowButton()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")), {}, true);
+        window.showPreviewTabs();
+        window.resize(920, 600);
+        window.show();
+        QTest::qWait(100);
+        auto *settings = window.findChild<QPushButton *>(QStringLiteral("connectionSettingsButton"));
+        auto *menu = settings->findChild<QMenu *>();
+        QVERIFY(menu);
+        QVERIFY(!window.m_tabs->tabBar()->drawBase());
+        settings->setEnabled(true);
+        settings->click();
+        QTRY_VERIFY(menu->isVisible());
+        const QRect bounds(window.mapToGlobal(QPoint(0, 0)), window.size());
+        QVERIFY(bounds.contains(menu->geometry()));
+        QVERIFY(menu->geometry().top() >= settings->mapToGlobal(QPoint(0, settings->height())).y());
+        QVERIFY(menu->geometry().right() <= settings->mapToGlobal(QPoint(settings->width(), 0)).x());
+        const auto screenshot = qEnvironmentVariable("ORBIDEV_UI05_MENU_SCREENSHOT");
+        if (!screenshot.isEmpty())
+        {
+            // 弹出菜单是独立窗口；组合两个真实控件的抓图以记录相对位置。
+            QPixmap capture = window.grab();
+            QPainter painter(&capture);
+            painter.drawPixmap(window.mapFromGlobal(menu->pos()), menu->grab());
+            painter.end();
+            QVERIFY(capture.save(screenshot));
+        }
+        QTest::keyClick(menu, Qt::Key_Escape);
+        QTRY_VERIFY(!menu->isVisible());
+        QVERIFY(window.findChildren<sshworkbench::SshSession *>().isEmpty());
+        QVERIFY(window.close());
+        QVERIFY(QDir(directory.path()).entryList(QDir::Files).isEmpty());
+    }
+
+    void longProjectPreviewFitsNarrowWindow()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")), {}, true);
+        window.m_state.projects.projects[0].name = QString(80, QChar(0x9879));
+        window.m_state.projects.projects[0].directory =
+            QStringLiteral("D:/") + QString(1000, QLatin1Char('x'));
+        window.renderProjects();
+        window.showPreviewTabs();
+        window.m_tabs->currentWidget()->setProperty("hostName", QString(80, QChar(0x5bb6)));
+        window.updateWorkspace();
+        window.resize(920, 600);
+        window.show();
+        QTest::qWait(100);
+        QVERIFY(window.centralWidget()->width() <= window.width());
+        QVERIFY(window.m_projects->width() < window.width() / 2);
+        QCOMPARE(window.m_projects->horizontalScrollBar()->maximum(), 0);
+        auto *location =
+            window.m_tabs->currentWidget()->findChild<QLabel *>(QStringLiteral("terminalLocation"));
+        QVERIFY(location);
+        QVERIFY(location->width() < window.width());
+        QVERIFY(location->toolTip().contains(window.m_state.projects.projects[0].directory));
+        const auto screenshot = qEnvironmentVariable("ORBIDEV_UI05_NARROW_SCREENSHOT");
+        if (!screenshot.isEmpty())
+            QVERIFY(window.grab().save(screenshot));
+        QVERIFY(window.close());
+        QCOMPARE(QDir(directory.path()).entryList(QDir::Files).size(), 0);
+    }
+
+    void projectActionsStayLocalAndActiveTargetIsIndependent()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")));
+        auto *edit = window.findChild<QAction *>(QStringLiteral("editProjectAction"));
+        auto *remove = window.findChild<QAction *>(QStringLiteral("removeProjectAction"));
+        QVERIFY(edit);
+        QVERIFY(remove);
+        QCOMPARE(edit->shortcutContext(), Qt::WidgetShortcut);
+        QCOMPARE(remove->shortcutContext(), Qt::WidgetShortcut);
+        QVERIFY(window.m_projects->actions().contains(edit));
+        QVERIFY(window.m_projects->actions().contains(remove));
+        launcher::Project project{QStringLiteral("项目"), QStringLiteral("D:/Original"), true,
+                                  QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
+        window.m_state.projects.projects = {project};
+        window.renderProjects();
+        auto *page = openPending(window, project);
+        auto *path = page->findChild<QLabel *>(QStringLiteral("terminalLocation"));
+        QVERIFY(path);
+        QVERIFY(path->text().contains(QStringLiteral("D:/Original")));
+        auto other = window.m_state.hosts.front();
+        other.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        other.name = QStringLiteral("另一台家庭电脑");
+        window.m_state.hosts.append(other);
+        window.m_state.currentHostId = other.id;
+        window.renderHosts();
+        window.reloadProfile();
+        window.renderProjects();
+        QCOMPARE(window.m_tabs->currentWidget(), page);
+        QVERIFY(window.m_host->text().contains(QStringLiteral("测试机")));
+        QVERIFY(!window.m_host->text().contains(other.name));
+        QCOMPARE(window.m_hostSelector->currentText(), other.name);
+        window.m_state.projects.projects[0].directory = QStringLiteral("D:/Changed");
+        window.updateWorkspace();
+        QVERIFY(path->text().contains(QStringLiteral("D:/Original")));
+    }
+
+    void previewTabsHaveNoSessionsOrConfigurationWrites()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")), {}, true);
+        window.showPreviewTabs();
+        QCOMPARE(window.m_tabs->count(), 2);
+        QVERIFY(window.findChildren<sshworkbench::SshSession *>().isEmpty());
+        QVERIFY(window.findChildren<rad::client::TerminalView *>().isEmpty());
+        QVERIFY(!window.m_editProject->isEnabled());
+        window.showPreviewTabs();
+        QCOMPARE(window.m_tabs->count(), 2);
+        window.closeTerminal(1);
+        window.closeTerminal(0);
+        QVERIFY(window.m_host->text().contains(QStringLiteral("尚未打开终端")));
+        QVERIFY(window.close());
+        QCOMPARE(QDir(directory.path()).entryList(QDir::Files).size(), 0);
+    }
+
     void freshConfigurationRestartStaysDisconnected()
     {
         QTemporaryDir directory;

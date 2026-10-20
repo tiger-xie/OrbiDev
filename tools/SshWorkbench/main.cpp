@@ -32,6 +32,7 @@ int main(int argc, char *argv[])
         {QStringLiteral("legacy-config"), QStringLiteral("只读迁移旧启动器项目"), QStringLiteral("path")});
     parser.addOption({QStringLiteral("screenshot"), QStringLiteral("无 SSH、无配置写入的界面预览"),
                       QStringLiteral("path")});
+    parser.addOption({QStringLiteral("preview-tabs"), QStringLiteral("截图时展示无连接的标签布局")});
     parser.process(application);
     const QString profile =
         parser.isSet(QStringLiteral("config")) ? parser.value(QStringLiteral("config")) : setupPath;
@@ -43,6 +44,8 @@ int main(int argc, char *argv[])
     sshworkbench::WorkbenchWindow window(profile, projects, parser.value(QStringLiteral("legacy-config")),
                                          preview);
     window.setWindowTitle(window.windowTitle() + QStringLiteral(" · ") + QApplication::applicationVersion());
+    if (preview && parser.isSet(QStringLiteral("preview-tabs")))
+        window.showPreviewTabs();
     window.show();
     if (preview)
     {

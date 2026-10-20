@@ -1,0 +1,30 @@
+适用于 .NET Framework MSBuild 版本 17.14.18+a338add32
+
+  Automatic MOC for target SshSetupCore
+  Automatic MOC for target WorkbenchPty
+  SshSetupCore.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\SshSetupCore.lib
+  WorkbenchPty.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchPty.lib
+  Automatic MOC for target WorkbenchCore
+  Automatic MOC for target SshSetupUi
+  WorkbenchCore.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchCore.lib
+  SshSetupUi.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\SshSetupUi.lib
+  Automatic MOC for target WorkbenchUi
+  WorkbenchWindow.cpp
+  WorkbenchUi.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchUi.lib
+  Automatic MOC for target OrbiDevWorkbench
+  OrbiDevWorkbench.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\OrbiDevWorkbench.exe
+适用于 .NET Framework MSBuild 版本 17.14.18+a338add32
+
+  Automatic MOC for target SshSetupCore
+  Automatic MOC for target WorkbenchPty
+  SshSetupCore.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\SshSetupCore.lib
+  WorkbenchPty.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchPty.lib
+  Automatic MOC for target SshSetupUi
+  Automatic MOC for target WorkbenchCore
+  WorkbenchCore.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchCore.lib
+  SshSetupUi.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\setup\Release\SshSetupUi.lib
+  Automatic MOC for target WorkbenchUi
+  WorkbenchUi.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchUi.lib
+  Automatic MOC for target WorkbenchWindowTests
+  WorkbenchWindowTests.cpp
+  WorkbenchWindowTests.vcxproj -> E:\Codex\Project\OrbiDev\build-ssh-workbench\Release\WorkbenchWindowTests.exe

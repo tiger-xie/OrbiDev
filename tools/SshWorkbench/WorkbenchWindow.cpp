@@ -23,6 +23,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPointer>
 #include <QProcess>
 #include <QPushButton>
@@ -36,6 +37,8 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QStyle>
+#include <QStyledItemDelegate>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -46,6 +49,54 @@
 
 namespace sshworkbench
 {
+namespace
+{
+// 保留原生勾选、选中与键盘行为，只将项目文字分为名称和目录两层。
+class ProjectDelegate final : public QStyledItemDelegate
+{
+public:
+    explicit ProjectDelegate(QObject *parent) : QStyledItemDelegate(parent)
+    {
+    }
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        return QSize(QStyledItemDelegate::sizeHint(option, index).width(), 78);
+    }
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        QStyleOptionViewItem styled(option);
+        initStyleOption(&styled, index);
+        // Qt 的样式文本会将换行转换为 U+2028；两行内容必须从原始模型读取。
+        const auto lines = index.data(Qt::DisplayRole).toString().split(QLatin1Char('\n'));
+        const QWidget *widget = styled.widget;
+        auto *style = widget ? widget->style() : QApplication::style();
+        const QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &styled, widget);
+        styled.text.clear();
+        style->drawControl(QStyle::CE_ItemViewItem, &styled, painter, widget);
+        painter->save();
+        painter->setClipRect(option.rect);
+        const QRect content(textRect.left() + 8, option.rect.top(),
+                            qMax(0, option.rect.right() - textRect.left() - 24), option.rect.height());
+        QFont nameFont = option.font;
+        nameFont.setPointSizeF(nameFont.pointSizeF() + 1);
+        painter->setFont(nameFont);
+        painter->setPen(option.palette.color(QPalette::Text));
+        const QFontMetrics nameMetrics(nameFont);
+        const QFontMetrics pathMetrics(option.font);
+        const int gap = 6;
+        const int top =
+            content.top() + (content.height() - nameMetrics.height() - pathMetrics.height() - gap) / 2;
+        painter->drawText(QPoint(content.left(), top + nameMetrics.ascent()),
+                          nameMetrics.elidedText(lines.value(0), Qt::ElideRight, content.width()));
+        painter->setFont(option.font);
+        painter->setPen(option.palette.color(QPalette::PlaceholderText));
+        painter->drawText(QPoint(content.left(), top + nameMetrics.height() + gap + pathMetrics.ascent()),
+                          pathMetrics.elidedText(lines.value(1), Qt::ElideMiddle, content.width()));
+        painter->restore();
+    }
+};
+}
+
 WorkbenchWindow::WorkbenchWindow(const QString &profilePath, const QString &projectsPath,
                                  const QString &legacyPath, bool preview, QWidget *parent)
     : QMainWindow(parent), m_profilePath(profilePath), m_projectsPath(projectsPath), m_preview(preview)
@@ -61,7 +112,7 @@ WorkbenchWindow::WorkbenchWindow(const QString &profilePath, const QString &proj
     {
         m_state.projects.projects = {{tr("产品开发"), QStringLiteral("D:/Projects/Product"), true},
                                      {tr("日常工具"), QStringLiteral("D:/Projects/Tools"), false}};
-        m_host->setText(tr("家庭电脑  ·  界面预览"));
+        m_hostSelector->addItem(tr("家庭电脑（预览）"));
         showFeedback(tr("界面预览：未读取身份，未启动 SSH，会话不会自动打开。"));
     }
     else
@@ -73,6 +124,41 @@ WorkbenchWindow::WorkbenchWindow(const QString &profilePath, const QString &proj
     if (!m_preview)
         loadPreferences();
     renderProjects();
+    updateWorkspace();
+}
+
+void WorkbenchWindow::showPreviewTabs()
+{
+    if (!m_preview || m_tabs->count() != 0)
+        return;
+    for (int index = 0; index < m_state.projects.projects.size(); ++index)
+    {
+        auto &project = m_state.projects.projects[index];
+        project.id = QStringLiteral("preview-%1").arg(index);
+        auto *page = new QWidget(m_tabs);
+        page->setProperty("projectId", project.id);
+        page->setProperty("projectName", project.name);
+        page->setProperty("hostName", tr("家庭电脑（预览）"));
+        page->setProperty("sessionNumber", index + 1);
+        page->setProperty("sessionState", tr("界面预览"));
+        auto *layout = new QVBoxLayout(page);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
+        auto *location = new QLabel(tr("家庭电脑（预览）  ·  %1").arg(project.directory), page);
+        location->setObjectName(QStringLiteral("terminalLocation"));
+        location->setTextFormat(Qt::PlainText);
+        location->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        location->setToolTip(location->text());
+        layout->addWidget(location);
+        auto *preview = new QLabel(tr("终端区域预览\n\n此场景仅展示标签与目录布局，未启动 SSH。"), page);
+        preview->setObjectName(QStringLiteral("terminalPreview"));
+        preview->setAlignment(Qt::AlignCenter);
+        layout->addWidget(preview, 1);
+        m_tabs->addTab(page, project.name);
+        updateTerminalLabel(page);
+    }
+    m_tabs->setCurrentIndex(0);
+    m_projects->setCurrentRow(0);
     updateWorkspace();
 }
 
@@ -238,16 +324,22 @@ void WorkbenchWindow::buildUi()
     auto *root = new QVBoxLayout(central);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
-    auto *toolbar = new QHBoxLayout;
-    toolbar->setContentsMargins(22, 16, 22, 16);
+    auto *toolbarPanel = new QWidget(central);
+    toolbarPanel->setObjectName(QStringLiteral("workbenchToolbar"));
+    auto *toolbar = new QHBoxLayout(toolbarPanel);
+    toolbar->setContentsMargins(18, 12, 18, 12);
+    toolbar->setSpacing(14);
     m_host = new QLabel(tr("尚未配置家庭电脑"), central);
     m_host->setObjectName(QStringLiteral("hostSummary"));
     m_host->setTextFormat(Qt::PlainText);
+    m_host->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_hostSelector = new QComboBox(central);
     m_hostSelector->setObjectName(QStringLiteral("hostSelector"));
     m_hostSelector->setMinimumWidth(180);
     m_hostSelector->setMaximumWidth(280);
     m_hostSelector->setEnabled(!m_preview);
+    m_hostSelector->setAccessibleName(tr("浏览家庭主机的项目"));
+    m_hostSelector->setToolTip(tr("选择要浏览的主机；已有终端保留创建时的目标"));
     toolbar->addWidget(m_hostSelector);
     toolbar->addWidget(m_host, 1);
     connect(m_hostSelector, qOverload<int>(&QComboBox::currentIndexChanged), this,
@@ -262,8 +354,9 @@ void WorkbenchWindow::buildUi()
                 reloadProfile();
                 renderProjects();
             });
-    auto *settings = new QPushButton(tr("连接设置…"), central);
+    auto *settings = new QPushButton(tr("设置"), central);
     settings->setObjectName(QStringLiteral("connectionSettingsButton"));
+    settings->setIcon(QIcon(QStringLiteral(":/resources/icon/workbench/settings.svg")));
     auto *hostMenu = new QMenu(settings);
     hostMenu->addAction(tr("添加家庭电脑…"), this, [this] { editHost(true); });
     hostMenu->addAction(tr("编辑当前主机／测试连接…"), this, [this] { editHost(false); });
@@ -285,39 +378,56 @@ void WorkbenchWindow::buildUi()
                     .arg(QCoreApplication::applicationVersion(), QString::fromLatin1(qVersion())));
         });
     about->setObjectName(QStringLiteral("aboutWorkbenchAction"));
-    settings->setMenu(hostMenu);
+    settings->setAccessibleDescription(tr("打开设置菜单"));
+    connect(settings, &QPushButton::clicked, this,
+            [this, settings, hostMenu]
+            {
+                hostMenu->ensurePolished();
+                const QSize menuSize = hostMenu->sizeHint();
+                QRect bounds(mapToGlobal(QPoint(0, 0)), size());
+                if (auto *screen = settings->screen())
+                    bounds = bounds.intersected(screen->availableGeometry());
+                // 右对齐并留在当前窗口内，避免菜单被右侧桌面或窗口边界截断。
+                QPoint position = settings->mapToGlobal(
+                    QPoint(settings->width() - menuSize.width(), settings->height() + 6));
+                position.setX(qBound(bounds.left(), position.x(),
+                                     qMax(bounds.left(), bounds.right() - menuSize.width() + 1)));
+                position.setY(qBound(bounds.top(), position.y(),
+                                     qMax(bounds.top(), bounds.bottom() - menuSize.height() + 1)));
+                hostMenu->popup(position);
+            });
+    auto *openSettings = new QShortcut(QKeySequence(QStringLiteral("Alt+Down")), settings);
+    openSettings->setContext(Qt::WidgetShortcut);
+    connect(openSettings, &QShortcut::activated, settings, &QPushButton::click);
     toolbar->addWidget(settings);
-    auto *appearance = new QPushButton(tr("外观…"), central);
-    appearance->setObjectName(QStringLiteral("appearanceSettingsButton"));
-    appearance->setEnabled(!m_preview);
-    connect(appearance, &QPushButton::clicked, this, &WorkbenchWindow::showAppearanceSettings);
-    toolbar->addWidget(appearance);
+    hostMenu->insertSeparator(about);
+    auto *appearance = new QAction(tr("外观设置…"), hostMenu);
+    appearance->setObjectName(QStringLiteral("appearanceSettingsAction"));
+    connect(appearance, &QAction::triggered, this, &WorkbenchWindow::showAppearanceSettings);
+    hostMenu->insertAction(about, appearance);
     for (int delta : {-1, 1})
     {
-        auto *zoom = new QPushButton(delta < 0 ? tr("A−") : tr("A+"), central);
-        zoom->setProperty("role", "compact");
-        zoom->setToolTip(delta < 0 ? tr("缩小终端文字（Ctrl+-）") : tr("放大终端文字（Ctrl+=）"));
-        zoom->setEnabled(!m_preview);
-        const auto applyZoom = [this, delta]
-        {
-            if (m_preview || m_closing)
-                return;
-            setTerminalFontSize(m_terminalFontSize + delta);
-            savePreferences();
-        };
-        connect(zoom, &QPushButton::clicked, this, applyZoom);
-        auto *shortcut = new QShortcut(
-            QKeySequence(delta < 0 ? QStringLiteral("Ctrl+-") : QStringLiteral("Ctrl+=")), this);
-        connect(shortcut, &QShortcut::activated, this, applyZoom);
-        toolbar->addWidget(zoom);
+        auto *zoom = new QAction(delta < 0 ? tr("缩小终端文字") : tr("放大终端文字"), hostMenu);
+        zoom->setShortcut(QKeySequence(delta < 0 ? QStringLiteral("Ctrl+-") : QStringLiteral("Ctrl+=")));
+        addAction(zoom);
+        hostMenu->insertAction(about, zoom);
+        connect(zoom, &QAction::triggered, this,
+                [this, delta]
+                {
+                    if (m_preview || m_closing)
+                        return;
+                    setTerminalFontSize(m_terminalFontSize + delta);
+                    savePreferences();
+                });
     }
     m_newTerminal = new QPushButton(tr("新建终端"), central);
     m_newTerminal->setObjectName(QStringLiteral("newTerminalButton"));
     m_newTerminal->setProperty("role", "primary");
+    m_newTerminal->setIcon(QIcon(QStringLiteral(":/resources/icon/workbench/terminal.svg")));
     connect(m_newTerminal, &QPushButton::clicked, this, [this] { openCurrent(true); });
     m_newTerminal->setToolTip(tr("为选中项目额外创建一个 SSH 会话"));
     toolbar->addWidget(m_newTerminal);
-    root->addLayout(toolbar);
+    root->addWidget(toolbarPanel);
     m_feedback = new QLabel(central);
     m_feedback->setObjectName(QStringLiteral("feedback"));
     m_feedback->setTextFormat(Qt::PlainText);
@@ -331,17 +441,29 @@ void WorkbenchWindow::buildUi()
     rail->setObjectName(QStringLiteral("projectRail"));
     rail->setMinimumWidth(230);
     auto *railLayout = new QVBoxLayout(rail);
-    railLayout->setContentsMargins(12, 20, 12, 16);
+    railLayout->setContentsMargins(0, 12, 0, 14);
+    railLayout->setSpacing(10);
+    auto *railHeading = new QHBoxLayout;
+    railHeading->setContentsMargins(18, 0, 16, 0);
     auto *title = new QLabel(tr("项目"), rail);
     title->setProperty("role", "section");
-    railLayout->addWidget(title);
-    auto *hint = new QLabel(tr("双击切换已有终端；勾选后可批量打开"), rail);
-    hint->setProperty("role", "muted");
-    hint->setWordWrap(true);
-    railLayout->addWidget(hint);
+    railHeading->addWidget(title, 1);
+    auto *add = new QPushButton(rail);
+    add->setObjectName(QStringLiteral("addProjectButton"));
+    add->setIcon(QIcon(QStringLiteral(":/resources/icon/workbench/add.svg")));
+    add->setAccessibleName(tr("新建项目"));
+    add->setToolTip(tr("新建项目"));
+    add->setFixedSize(30, 30);
+    add->setEnabled(!m_preview);
+    connect(add, &QPushButton::clicked, this, [this] { editProject(true); });
+    railHeading->addWidget(add);
+    railLayout->addLayout(railHeading);
     m_projects = new QListWidget(rail);
     m_projects->setObjectName(QStringLiteral("projectList"));
-    m_projects->setWordWrap(true);
+    m_projects->setWordWrap(false);
+    m_projects->setItemDelegate(new ProjectDelegate(m_projects));
+    m_projects->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_projects->setToolTip(tr("双击复用已有终端；空格勾选；F2 编辑；Delete 移除"));
     railLayout->addWidget(m_projects, 1);
     connect(m_projects, &QListWidget::itemChanged, this,
             [this](QListWidgetItem *item)
@@ -365,27 +487,28 @@ void WorkbenchWindow::buildUi()
                     m_recentProjects.insert(m_state.currentHostId, m_state.projects.projects[row].id);
                 updateWorkspace();
             });
-    auto *actions = new QHBoxLayout;
-    auto *add = new QPushButton(tr("添加"), rail);
-    add->setObjectName(QStringLiteral("addProjectButton"));
-    auto *edit = new QPushButton(tr("编辑"), rail);
-    auto *remove = new QPushButton(tr("移除"), rail);
-    m_editProject = edit;
-    m_removeProject = remove;
-    for (auto *button : {add, edit, remove})
+    m_projects->setContextMenuPolicy(Qt::ActionsContextMenu);
+    m_editProject = new QAction(tr("编辑项目…"), m_projects);
+    m_editProject->setObjectName(QStringLiteral("editProjectAction"));
+    m_editProject->setShortcut(QKeySequence(Qt::Key_F2));
+    m_removeProject = new QAction(tr("移除项目…"), m_projects);
+    m_removeProject->setObjectName(QStringLiteral("removeProjectAction"));
+    m_removeProject->setShortcut(QKeySequence(Qt::Key_Delete));
+    for (auto *action : {m_editProject, m_removeProject})
     {
-        button->setProperty("role", "compact");
-        button->setEnabled(!m_preview);
-        actions->addWidget(button);
+        action->setShortcutContext(Qt::WidgetShortcut);
+        m_projects->addAction(action);
     }
-    connect(add, &QPushButton::clicked, this, [this] { editProject(true); });
-    connect(edit, &QPushButton::clicked, this, [this] { editProject(false); });
-    connect(remove, &QPushButton::clicked, this, &WorkbenchWindow::removeProject);
-    railLayout->addLayout(actions);
+    connect(m_editProject, &QAction::triggered, this, [this] { editProject(false); });
+    connect(m_removeProject, &QAction::triggered, this, &WorkbenchWindow::removeProject);
     m_openSelected = new QPushButton(tr("打开勾选项目"), rail);
     m_openSelected->setObjectName(QStringLiteral("openSelectedButton"));
     connect(m_openSelected, &QPushButton::clicked, this, &WorkbenchWindow::openSelected);
-    railLayout->addWidget(m_openSelected);
+    m_openSelected->setIcon(QIcon(QStringLiteral(":/resources/icon/setup/folder.svg")));
+    auto *batchActions = new QHBoxLayout;
+    batchActions->setContentsMargins(14, 0, 14, 0);
+    batchActions->addWidget(m_openSelected);
+    railLayout->addLayout(batchActions);
     m_workspace = new QStackedWidget(splitter);
     auto *empty = new QWidget(m_workspace);
     auto *emptyLayout = new QVBoxLayout(empty);
@@ -409,6 +532,10 @@ void WorkbenchWindow::buildUi()
     m_tabs->setObjectName(QStringLiteral("terminalTabs"));
     m_tabs->setTabsClosable(true);
     m_tabs->setMovable(true);
+    m_tabs->setDocumentMode(true);
+    m_tabs->setElideMode(Qt::ElideRight);
+    m_tabs->tabBar()->setExpanding(false);
+    m_tabs->tabBar()->setDrawBase(false);
     connect(m_tabs, &QTabWidget::currentChanged, this,
             [this](int index)
             {
@@ -416,6 +543,7 @@ void WorkbenchWindow::buildUi()
                 {
                     page->setProperty("lastActivated", QVariant::fromValue(++m_activationSerial));
                     selectTerminalProject(page);
+                    updateActiveSession();
                     if (auto *terminal = page->findChild<rad::client::TerminalView *>())
                         terminal->focusTerminal();
                 }
@@ -428,6 +556,7 @@ void WorkbenchWindow::buildUi()
                 {
                     page->setProperty("lastActivated", QVariant::fromValue(++m_activationSerial));
                     selectTerminalProject(page);
+                    updateActiveSession();
                     if (auto *terminal = page->findChild<rad::client::TerminalView *>())
                         terminal->focusTerminal();
                 }
@@ -441,17 +570,27 @@ void WorkbenchWindow::buildUi()
     root->addWidget(splitter, 1);
     m_summary = new QLabel(tr("没有活动终端"), this);
     statusBar()->addWidget(m_summary);
-    statusBar()->addPermanentWidget(new QLabel(tr("关闭客户端将断开 SSH · 不保证任务继续运行"), this));
+    auto *shortcuts = new QLabel(tr("Ctrl+Shift+C 复制  ·  Ctrl+Shift+V 粘贴"), this);
+    shortcuts->setObjectName(QStringLiteral("workbenchShortcuts"));
+    statusBar()->addPermanentWidget(shortcuts);
+    auto *sessionHelp = new QPushButton(tr("断线说明"), this);
+    sessionHelp->setObjectName(QStringLiteral("sessionHelpButton"));
+    sessionHelp->setToolTip(tr("关闭客户端将断开 SSH，不保证远程任务继续运行"));
+    connect(sessionHelp, &QPushButton::clicked, this,
+            [this]
+            {
+                QMessageBox::information(this, tr("SSH 会话与断线"),
+                                         tr("关闭客户端或断线会中断 SSH 连接，不保证远程任务继续运行。\n"
+                                            "重新连接将创建新会话，不会恢复原进程。"));
+            });
+    statusBar()->addPermanentWidget(sessionHelp);
     setCentralWidget(central);
     settings->setEnabled(!m_preview);
     setTabOrder(m_hostSelector, settings);
-    setTabOrder(settings, appearance);
-    setTabOrder(appearance, m_newTerminal);
+    setTabOrder(settings, m_newTerminal);
     setTabOrder(m_newTerminal, m_projects);
     setTabOrder(m_projects, add);
-    setTabOrder(add, edit);
-    setTabOrder(edit, remove);
-    setTabOrder(remove, m_openSelected);
+    setTabOrder(add, m_openSelected);
     m_tabs->setToolTip(tr(
         "复制 Ctrl+Shift+C；粘贴 Ctrl+V / Ctrl+Shift+V；字号 Ctrl+- / Ctrl+=。Tab 在终端中交给远程程序。"));
     m_newTerminal->setToolTip(tr("先选择项目，再额外创建 SSH 会话；双击项目会复用已有终端"));
@@ -473,11 +612,8 @@ bool WorkbenchWindow::reloadProfile()
     if (m_profileReady)
     {
         m_profile = host->connection;
-        m_host->setText(tr("%1@%2:%3").arg(m_profile.user, m_profile.host).arg(m_profile.port));
-        m_host->setToolTip(tr("已配置，实际连接状态请查看各终端"));
     }
-    else
-        m_host->setText(tr("请先添加或配置家庭电脑"));
+    updateActiveSession();
     m_openSelected->setEnabled(m_profileReady && !m_preview);
     m_newTerminal->setEnabled(m_profileReady && !m_preview);
     return m_profileReady;
@@ -673,7 +809,7 @@ void WorkbenchWindow::updateProjectLabels()
                           .arg(project.name)
                           .arg(count)
                           .arg(project.directory.isEmpty() ? tr("家庭用户目录") : project.directory));
-        item->setToolTip(tr("包含准备中、运行中及保留的退出标签，关闭标签后减少计数。"));
+        item->setToolTip(item->text() + tr("\n包含准备中、运行中及保留的退出标签；右键编辑或移除。"));
     }
 }
 
@@ -718,6 +854,7 @@ void WorkbenchWindow::updateTerminalLabel(QWidget *page)
                                                                  : page->property("sessionState").toString();
     m_tabs->setTabText(
         index, tr("%1 #%2 · %3").arg(name).arg(page->property("sessionNumber").toULongLong()).arg(state));
+    updateActiveSession();
 }
 
 bool WorkbenchWindow::saveProjects(const launcher::Configuration &configuration)
@@ -914,6 +1051,7 @@ void WorkbenchWindow::createTerminal(launcher::Project project, HostProfile host
     const auto profile = host.connection;
     auto *page = new QWidget(m_tabs);
     page->setProperty("hostId", host.id);
+    page->setProperty("hostName", host.name);
     page->setProperty("projectId", project.id);
     page->setProperty("projectName", project.name);
     page->setProperty("sessionNumber", QVariant::fromValue(++m_terminalSerial));
@@ -926,6 +1064,15 @@ void WorkbenchWindow::createTerminal(launcher::Project project, HostProfile host
     page->setProperty("rows", 32);
     auto *layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    auto *location = new QLabel(host.name + QStringLiteral("  ·  ") +
+                                    (project.directory.isEmpty() ? tr("家庭用户目录") : project.directory),
+                                page);
+    location->setObjectName(QStringLiteral("terminalLocation"));
+    location->setTextFormat(Qt::PlainText);
+    location->setToolTip(location->text());
+    location->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    layout->addWidget(location);
     auto *status = new QLabel(tr("正在准备终端…"), page);
     status->setObjectName(QStringLiteral("terminalStatus"));
     status->setTextFormat(Qt::PlainText);
@@ -1271,11 +1418,32 @@ void WorkbenchWindow::showFeedback(const QString &message, bool error)
     m_feedback->setVisible(!message.isEmpty());
 }
 
+void WorkbenchWindow::updateActiveSession()
+{
+    const auto *page = m_tabs->currentWidget();
+    if (page)
+    {
+        const QString state = page->property("sessionClosing").toBool()
+                                  ? tr("正在关闭")
+                                  : page->property("sessionState").toString();
+        m_host->setText(tr("当前标签：%1 · %2").arg(page->property("hostName").toString(), state));
+        m_host->setToolTip(m_host->text() + QLatin1Char('\n') +
+                           page->property("sessionDestination").toString());
+    }
+    else
+    {
+        m_host->setText(tr("尚未打开终端"));
+        m_host->setToolTip(tr("左侧选择浏览的主机；打开项目后，此处显示当前标签的实际状态。"));
+    }
+}
+
 void WorkbenchWindow::updateWorkspace()
 {
     updateProjectLabels();
     m_workspace->setCurrentIndex(m_tabs->count() == 0 ? 0 : 1);
-    m_summary->setText(m_tabs->count() == 0 ? tr("没有活动终端") : tr("%1 个终端标签").arg(m_tabs->count()));
+    updateActiveSession();
+    m_summary->setText(m_tabs->count() == 0 ? tr("SSH  ·  UTF-8  ·  没有活动终端")
+                                            : tr("SSH  ·  UTF-8  ·  %1 个标签").arg(m_tabs->count()));
     const bool editable = !m_preview && !m_closing && m_projectsReadable;
     const bool selected = projectRow() >= 0;
     m_editProject->setEnabled(editable && selected);
@@ -1287,10 +1455,9 @@ void WorkbenchWindow::updateWorkspace()
     m_openSelected->setEnabled(editable && m_profileReady && checked);
     m_emptyHint->setText(
         !m_projectsReadable ? tr("配置读取失败，请先处理上方提示。原配置文件不会被覆盖。")
-        : !m_profileReady
-            ? tr("从“连接设置”添加家庭电脑或运行首次配置向导。\n配置完成后，添加项目并打开终端。")
+        : !m_profileReady   ? tr("从“设置”添加家庭电脑或运行首次配置向导。\n配置完成后，添加项目并打开终端。")
         : m_projects->count() == 0
-            ? tr("此主机尚无项目。点击左下方“添加”，填写家庭电脑上的项目目录。")
+            ? tr("此主机尚无项目。点击“项目”旁的新增按钮，填写家庭电脑上的项目目录。")
             : tr("双击左侧项目打开终端，或勾选后批量打开。\n重启工作台只恢复选择，不会自动启动 "
                  "Claude。\n复制 Ctrl+Shift+C · 粘贴 Ctrl+V · 字号 Ctrl+- / Ctrl+="));
 }

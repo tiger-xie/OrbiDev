@@ -16,5 +16,9 @@
     <file alias="icon/setup/error.svg">resources/icon/setup/error.svg</file>
     <file alias="icon/setup/user.svg">resources/icon/setup/user.svg</file>
     <file alias="icon/setup/folder.svg">resources/icon/setup/folder.svg</file>
+    <file alias="icon/workbench/add.svg">resources/icon/workbench/add.svg</file>
+    <file alias="icon/workbench/settings.svg">resources/icon/workbench/settings.svg</file>
+    <file alias="icon/workbench/terminal.svg">resources/icon/workbench/terminal.svg</file>
+    <file alias="icon/workbench/LICENSE-Lucide.txt">resources/icon/workbench/LICENSE-Lucide.txt</file>
   </qresource>
 </RCC>
