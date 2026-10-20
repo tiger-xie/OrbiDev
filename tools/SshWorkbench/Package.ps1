@@ -47,7 +47,7 @@ if (-not $runtime) { throw '未找到 MSVC x64 运行库。' }
 Get-ChildItem -LiteralPath $runtime.FullName -Filter '*.dll' | Copy-Item -Destination $packageDirectory
 $licenseDirectory = Join-Path $packageDirectory 'licenses'
 New-Item -ItemType Directory -Path $licenseDirectory | Out-Null
-foreach ($source in @('third_party/ConPTY-LICENSE.txt','frontend/terminal/vendor/xterm-LICENSE.txt','frontend/terminal/vendor/fit-LICENSE.txt')) {
+foreach ($source in @('third_party/ConPTY-LICENSE.txt','frontend/terminal/vendor/xterm-LICENSE.txt','frontend/terminal/vendor/fit-LICENSE.txt','resources/icon/workbench/LICENSE-Lucide.txt')) {
     Copy-Item -LiteralPath (Join-Path $workspace $source) -Destination $licenseDirectory
 }
 $missingLicenses = @()
@@ -91,7 +91,7 @@ $manifest = [ordered]@{
     acceptanceComplete = $false; createdUtc = (Get-Date).ToUniversalTime().ToString('o')
     qtVersion = '5.15.2'; licenseTextsComplete = ($missingLicenses.Count -eq 0); missingLicenseTexts = $missingLicenses
     licenseReview = '文本随包提供；正式分发仍须核对开源许可和源码提供义务。'
-    knownLimitations = @('SSH-KI-001：Qt WebEngine 原生竞态尚未修复。','关闭或断线不保证远程任务继续。','候选包不代表全部真实双端及 Windows 11 验收完成。')
+    knownLimitations = @('SSH-KI-001：Qt WebEngine 原生竞态尚未修复。','Release 偶发终端初始化超时的根因尚未确认；本轮测试通过不代表该问题已修复。','关闭或断线不保证远程任务继续。','候选包不代表全部真实双端及 Windows 11 验收完成。')
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $packageDirectory 'manifest.json') -Encoding UTF8
 $hashes = @(Get-ChildItem -LiteralPath $packageDirectory -File -Recurse | Sort-Object FullName | ForEach-Object {

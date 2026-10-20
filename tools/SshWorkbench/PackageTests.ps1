@@ -29,6 +29,11 @@ ConvertTo-Json -InputObject $entry | Set-Content -LiteralPath (Join-Path $fixtur
 Set-Content -LiteralPath (Join-Path $fixture 'unexpected.txt') -Value 'unexpected' -Encoding UTF8
 Assert-Rejected { & (Join-Path $PSScriptRoot 'Verify-Package.ps1') -PackageDirectory $fixture }
 $passed++
+# 同一未登记文件隐藏后也必须拒绝，不能因文件属性跳过完整性检查。
+$unexpected = Get-Item -LiteralPath (Join-Path $fixture 'unexpected.txt')
+$unexpected.Attributes = $unexpected.Attributes -bor [IO.FileAttributes]::Hidden
+Assert-Rejected { & (Join-Path $PSScriptRoot 'Verify-Package.ps1') -PackageDirectory $fixture }
+$passed++
 # 小型临时证据目录保留，避免测试清理误删路径。
 Write-Host "打包验证：$passed 项通过；临时证据：$fixture"
 

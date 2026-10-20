@@ -1,0 +1,11 @@
+********* Start testing of WorkbenchWindowTests *********
+Config: Using QtTest library 5.15.2, Qt 5.15.2 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2019), windows 10
+PASS   : WorkbenchWindowTests::initTestCase()
+PASS   : WorkbenchWindowTests::projectDialogLongFieldsFit()
+PASS   : WorkbenchWindowTests::appearanceCancelAndConfirm()
+PASS   : WorkbenchWindowTests::statusBannerVisualStates()
+PASS   : WorkbenchWindowTests::settingsPopupStaysInsideWindowAndBelowButton()
+PASS   : WorkbenchWindowTests::longProjectPreviewFitsNarrowWindow()
+PASS   : WorkbenchWindowTests::cleanupTestCase()
+Totals: 7 passed, 0 failed, 0 skipped, 0 blacklisted, 3523ms
+********* Finished testing of WorkbenchWindowTests *********

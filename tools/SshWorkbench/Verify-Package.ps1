@@ -25,7 +25,7 @@ foreach ($entry in $entries) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "文件缺失：$relative" }
     if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $entry.sha256) { throw "文件校验失败：$relative" }
 }
-foreach ($file in Get-ChildItem -LiteralPath $root -File -Recurse) {
+foreach ($file in Get-ChildItem -LiteralPath $root -File -Recurse -Force) {
     $relative = $file.FullName.Substring($root.Length + 1).Replace('\','/')
     if ($relative -ne 'SHA256.json' -and -not $seen.ContainsKey($relative)) { throw "发现未登记文件：$relative" }
 }
