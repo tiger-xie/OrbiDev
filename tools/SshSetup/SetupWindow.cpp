@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -43,11 +44,30 @@ QLabel *label(const QString &text, QWidget *parent, const char *role = nullptr)
 {
     auto *result = new QLabel(text, parent);
     result->setWordWrap(true);
+    result->setMinimumWidth(0);
+    result->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     result->setTextFormat(Qt::PlainText);
     result->setTextInteractionFlags(Qt::TextSelectableByMouse);
     if (role)
         result->setProperty("role", role);
     return result;
+}
+
+QWidget *card(QWidget *parent, QVBoxLayout *&layout)
+{
+    auto *result = new QWidget(parent);
+    result->setProperty("role", "setupCard");
+    result->setAttribute(Qt::WA_StyledBackground);
+    layout = new QVBoxLayout(result);
+    layout->setContentsMargins(22, 20, 22, 20);
+    layout->setSpacing(16);
+    return result;
+}
+
+void setIcon(QPushButton *button, const QString &name)
+{
+    button->setIcon(QIcon(QStringLiteral(":/resources/icon/setup/%1.svg").arg(name)));
+    button->setIconSize(QSize(20, 20));
 }
 
 bool savePublicFile(const QString &path, const QByteArray &contents, QString &error)
@@ -112,21 +132,63 @@ void SetupWindow::buildUi()
     body->setSpacing(0);
     auto *rail = new QWidget(this);
     rail->setObjectName(QStringLiteral("stepRail"));
-    rail->setFixedWidth(220);
+    rail->setFixedWidth(m_homeMode ? 220 : 248);
     auto *railLayout = new QVBoxLayout(rail);
     railLayout->setContentsMargins(0, 30, 0, 24);
     const QStringList names =
         m_homeMode ? QStringList{tr("检查环境"), tr("导入公钥"), tr("应用配置"), tr("获取连接信息")}
                    : QStringList{tr("检查环境"), tr("创建本机身份"), tr("授权家庭电脑"), tr("测试连接")};
+    railLayout->setSpacing(0);
     for (int index = 0; index < names.size(); ++index)
     {
-        auto *step = label(QStringLiteral("%1   %2").arg(index + 1).arg(names.at(index)), rail, "step");
-        step->setMinimumHeight(70);
-        railLayout->addWidget(step);
-        m_steps.append(step);
+        if (m_homeMode)
+        {
+            auto *step = label(QStringLiteral("%1   %2").arg(index + 1).arg(names.at(index)), rail, "step");
+            step->setMinimumHeight(70);
+            railLayout->addWidget(step);
+            m_steps.append(step);
+            continue;
+        }
+        auto *row = new QWidget(rail);
+        row->setObjectName(QStringLiteral("setupStep%1").arg(index));
+        row->setProperty("role", "setupStep");
+        row->setAttribute(Qt::WA_StyledBackground);
+        auto *rowLayout = new QHBoxLayout(row);
+        rowLayout->setContentsMargins(24, 18, 16, 18);
+        rowLayout->setSpacing(16);
+        auto *badge = label(QString::number(index + 1), row, "stepBadge");
+        badge->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        badge->setTextInteractionFlags(Qt::NoTextInteraction);
+        badge->setFixedSize(32, 32);
+        badge->setAlignment(Qt::AlignCenter);
+        rowLayout->addWidget(badge, 0, Qt::AlignTop);
+        auto *texts = new QVBoxLayout;
+        texts->setSpacing(6);
+        texts->addWidget(label(names.at(index), row, "stepName"));
+        auto *description = label({}, row, "muted");
+        texts->addWidget(description);
+        rowLayout->addLayout(texts, 1);
+        railLayout->addWidget(row);
+        m_stepRows.append(row);
+        m_stepBadges.append(badge);
+        m_stepDescriptions.append(description);
+        if (index < names.size() - 1)
+        {
+            auto *lineRow = new QHBoxLayout;
+            lineRow->setContentsMargins(40, 0, 0, 0);
+            auto *line = new QWidget(rail);
+            line->setProperty("role", "stepLine");
+            line->setAttribute(Qt::WA_StyledBackground);
+            line->setFixedSize(2, 18);
+            lineRow->addWidget(line);
+            lineRow->addStretch();
+            railLayout->addLayout(lineRow);
+            m_stepLines.append(line);
+        }
     }
     railLayout->addStretch();
-    railLayout->addWidget(label(tr("OrbiDev\nSSH 工作台"), rail, "muted"));
+    if (m_homeMode)
+        railLayout->addWidget(label(tr("OrbiDev\nSSH 工作台"), rail, "muted"));
     body->addWidget(rail);
     auto *content = new QWidget(this);
     auto *contentLayout = new QVBoxLayout(content);
@@ -152,7 +214,10 @@ void SetupWindow::buildUi()
     contentLayout->addWidget(m_feedback);
     body->addWidget(content, 1);
     root->addLayout(body, 1);
-    auto *footer = new QHBoxLayout;
+    auto *footerWidget = new QWidget(this);
+    footerWidget->setObjectName(QStringLiteral("setupFooter"));
+    footerWidget->setAttribute(Qt::WA_StyledBackground);
+    auto *footer = new QHBoxLayout(footerWidget);
     footer->setContentsMargins(24, 16, 32, 16);
     m_back = new QPushButton(tr("上一步"), this);
     m_back->setObjectName(QStringLiteral("backButton"));
@@ -162,7 +227,8 @@ void SetupWindow::buildUi()
     footer->addWidget(m_back);
     footer->addStretch();
     footer->addWidget(m_next);
-    root->addLayout(footer);
+    root->addWidget(footerWidget);
+    connect(m_pages, &QStackedWidget::currentChanged, this, [this] { updateActions(); });
     connect(m_back, &QPushButton::clicked, this, [this] { setPage(m_pages->currentIndex() - 1); });
     connect(m_next, &QPushButton::clicked, this, &SetupWindow::next);
 }
@@ -170,6 +236,8 @@ void SetupWindow::buildUi()
 QWidget *SetupWindow::makePage(const QString &title, const QString &description, QVBoxLayout *&layout)
 {
     auto *page = new QWidget(m_pages);
+    if (!m_homeMode)
+        page->setObjectName(QStringLiteral("clientSetupPage"));
     layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 12);
     layout->setSpacing(18);
@@ -190,11 +258,23 @@ void SetupWindow::buildEnvironmentPage()
                  m_homeMode ? tr("在运行 Claude 的家庭电脑上使用此工具。默认只配置当前 Windows 用户。")
                             : tr("检查 OpenSSH 客户端与 Tailscale。网络在线与密钥授权将分别验证。"),
                  layout);
-    m_environmentText = label(tr("尚未检查\n\nOpenSSH：待检测\nTailscale：待检测"), page);
-    layout->addWidget(m_environmentText);
+    QVBoxLayout *environmentLayout = layout;
+    QWidget *environmentCard = page;
+    if (!m_homeMode)
+    {
+        environmentCard = card(page, environmentLayout);
+        environmentLayout->addWidget(label(tr("本机连接组件"), environmentCard, "section"));
+        layout->addWidget(environmentCard);
+    }
+    m_environmentText = label(m_homeMode ? tr("尚未检查\n\nOpenSSH：待检测\nTailscale：待检测")
+                                         : tr("OpenSSH 客户端：待检测\n\nTailscale 网络：待检测"),
+                              environmentCard);
+    environmentLayout->addWidget(m_environmentText);
     auto *check = new QPushButton(tr("检查环境"), page);
     check->setObjectName(QStringLiteral("inspectButton"));
-    layout->addWidget(check, 0, Qt::AlignLeft);
+    if (!m_homeMode)
+        check->setProperty("role", "primary");
+    environmentLayout->addWidget(check, 0, Qt::AlignLeft);
     connect(check, &QPushButton::clicked, this, &SetupWindow::inspectEnvironment);
     if (m_homeMode)
     {
@@ -275,13 +355,21 @@ void SetupWindow::buildIdentityPage()
     QVBoxLayout *layout = nullptr;
     auto *page = makePage(tr("为这台电脑准备 SSH 身份"),
                           tr("使用专用 Ed25519 密钥。已有轻量版密钥也可以继续使用，无需重新授权。"), layout);
-    m_identityText = label(tr("尚未准备身份。私钥只保存在本机，不会展示或导出。"), page);
-    layout->addWidget(m_identityText);
+    QVBoxLayout *identityLayout = nullptr;
+    auto *identityCard = card(page, identityLayout);
+    identityLayout->addWidget(label(tr("本机 SSH 身份"), identityCard, "section"));
+    m_identityText = label(tr("尚未准备身份。创建后将在这里显示公钥指纹与本机保存位置。"), identityCard);
+    identityLayout->addWidget(m_identityText);
+    layout->addWidget(identityCard);
     auto *create = new QPushButton(tr("创建或检查专用身份"), page);
     create->setObjectName(QStringLiteral("createIdentityButton"));
     auto *existing = new QPushButton(tr("使用已有密钥…"), page);
-    layout->addWidget(create, 0, Qt::AlignLeft);
-    layout->addWidget(existing, 0, Qt::AlignLeft);
+    create->setProperty("role", "primary");
+    auto *identityButtons = new QHBoxLayout;
+    identityButtons->addWidget(create);
+    identityButtons->addWidget(existing);
+    identityButtons->addStretch();
+    identityLayout->addLayout(identityButtons);
     connect(create, &QPushButton::clicked, this, [this] { prepareIdentity(); });
     connect(existing, &QPushButton::clicked, this,
             [this]
@@ -303,23 +391,40 @@ void SetupWindow::buildAuthorizationPage()
     QVBoxLayout *layout = nullptr;
     auto *page =
         makePage(tr("将这台电脑授权给家庭电脑"), tr("请在家庭电脑的配置工具中导入这里的公钥。"), layout);
-    m_publicSummary = label(tr("尚未准备公钥"), page);
-    layout->addWidget(m_publicSummary);
-    layout->addWidget(label(tr("公钥正文（用于家庭端授权）"), page, "section"));
+    QVBoxLayout *summaryLayout = nullptr;
+    auto *summaryCard = card(page, summaryLayout);
+    m_publicSummary = label(tr("本机设备：准备身份后显示\n\n公钥指纹：尚未准备"), summaryCard);
+    summaryLayout->addWidget(m_publicSummary);
+    layout->addWidget(summaryCard);
     m_publicKeyPreview = new QPlainTextEdit(page);
     m_publicKeyPreview->setObjectName(QStringLiteral("publicKeyPreview"));
     m_publicKeyPreview->setReadOnly(true);
     m_publicKeyPreview->setMaximumHeight(90);
     m_publicKeyPreview->setPlaceholderText(
         tr("准备身份后显示 ssh-ed25519 开头的公钥；SHA256 指纹不能用于授权。"));
-    layout->addWidget(m_publicKeyPreview);
+    auto *showKey = new QPushButton(tr("查看公钥正文"), summaryCard);
+    showKey->setObjectName(QStringLiteral("showPublicKeyButton"));
+    showKey->setCheckable(true);
+    m_publicKeyPreview->setVisible(false);
+    connect(showKey, &QPushButton::toggled, this,
+            [this, showKey](bool visible)
+            {
+                m_publicKeyPreview->setVisible(visible);
+                showKey->setText(visible ? tr("收起公钥正文") : tr("查看公钥正文"));
+            });
+    summaryLayout->addWidget(m_publicKeyPreview);
     auto *buttons = new QHBoxLayout;
     auto *copy = new QPushButton(tr("复制公钥"), page);
     auto *exportKey = new QPushButton(tr("导出公钥"), page);
+    copy->setObjectName(QStringLiteral("copyPublicKeyButton"));
+    exportKey->setObjectName(QStringLiteral("exportPublicKeyButton"));
+    setIcon(copy, QStringLiteral("copy"));
+    setIcon(exportKey, QStringLiteral("export"));
     buttons->addWidget(copy);
     buttons->addWidget(exportKey);
+    buttons->addWidget(showKey);
     buttons->addStretch();
-    layout->addLayout(buttons);
+    summaryLayout->addLayout(buttons);
     connect(copy, &QPushButton::clicked, this,
             [this]
             {
@@ -329,13 +434,28 @@ void SetupWindow::buildAuthorizationPage()
                 showFeedback(tr("公钥已复制。请到家庭端配置工具中粘贴。"));
             });
     connect(exportKey, &QPushButton::clicked, this, &SetupWindow::exportPublicKey);
-    layout->addSpacing(16);
-    layout->addWidget(label(tr("接下来，在家庭电脑上完成以下操作"), page, "section"));
-    layout->addWidget(label(tr("1   打开 OrbiDev 家庭端配置工具\n\n2   "
-                               "粘贴或导入公钥，核对指纹后应用授权\n\n3   导出连接信息，回到这里测试连接"),
-                            page));
+    QVBoxLayout *instructions = nullptr;
+    auto *instructionCard = card(page, instructions);
+    instructions->addWidget(label(tr("接下来，请在家庭电脑上完成以下操作"), instructionCard, "section"));
+    const QStringList actions{tr("打开 OrbiDev 家庭端配置工具"), tr("粘贴或导入公钥，核对指纹后应用授权"),
+                              tr("导出连接信息，返回这里测试连接")};
+    for (int index = 0; index < actions.size(); ++index)
+    {
+        auto *row = new QHBoxLayout;
+        row->setSpacing(16);
+        auto *number = label(QString::number(index + 1), instructionCard, "instructionNumber");
+        number->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        number->setTextInteractionFlags(Qt::NoTextInteraction);
+        number->setFixedSize(28, 28);
+        number->setAlignment(Qt::AlignCenter);
+        row->addWidget(number);
+        row->addWidget(label(actions.at(index), instructionCard), 1);
+        instructions->addLayout(row);
+    }
+    layout->addWidget(instructionCard);
     layout->addStretch();
-    layout->addWidget(label(tr("只传输公钥。家庭端无需保持配置工具运行。"), page, "muted"));
+    layout->addWidget(
+        label(tr("私钥仅保存在本机，不会导出或传输。家庭端无需保持配置工具运行。"), page, "muted"));
 }
 
 void SetupWindow::buildConnectionPage()
@@ -344,7 +464,12 @@ void SetupWindow::buildConnectionPage()
     auto *page = makePage(
         tr("测试家庭电脑连接"),
         tr("分别检查网络、SSH 服务、密钥认证与 Claude。首次连接请核对家庭端显示的主机指纹。"), layout);
+    QVBoxLayout *connectionLayout = nullptr;
+    auto *connectionCard = card(page, connectionLayout);
+    layout->addWidget(connectionCard);
     auto *form = new QFormLayout;
+    form->setSpacing(14);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     m_host = new QLineEdit(page);
     m_host->setObjectName(QStringLiteral("hostEdit"));
     m_host->setPlaceholderText(tr("Tailscale 地址或 SSH 主机名"));
@@ -358,12 +483,13 @@ void SetupWindow::buildConnectionPage()
     form->addRow(tr("登录用户"), m_user);
     form->addRow(tr("SSH 端口"), m_port);
     form->addRow(tr("预期主机指纹"), m_fingerprint);
-    layout->addLayout(form);
+    connectionLayout->addLayout(form);
     m_fingerprintConfirmed = new QCheckBox(tr("已核对家庭电脑显示的主机指纹"), page);
-    layout->addWidget(m_fingerprintConfirmed);
+    connectionLayout->addWidget(m_fingerprintConfirmed);
     auto *buttons = new QHBoxLayout;
     auto *import = new QPushButton(tr("导入连接信息…"), page);
     auto *test = new QPushButton(tr("测试连接"), page);
+    test->setProperty("role", "primary");
     test->setObjectName(QStringLiteral("testConnectionButton"));
     m_copyConnectionReport = new QPushButton(tr("复制脱敏诊断"), page);
     m_copyConnectionReport->setObjectName(QStringLiteral("copyConnectionReportButton"));
@@ -372,7 +498,7 @@ void SetupWindow::buildConnectionPage()
     buttons->addWidget(test);
     buttons->addWidget(m_copyConnectionReport);
     buttons->addStretch();
-    layout->addLayout(buttons);
+    connectionLayout->addLayout(buttons);
     connect(import, &QPushButton::clicked, this, &SetupWindow::importConnection);
     connect(test, &QPushButton::clicked, this, &SetupWindow::checkConnection);
     connect(m_copyConnectionReport, &QPushButton::clicked, this,
@@ -380,6 +506,7 @@ void SetupWindow::buildConnectionPage()
     const auto invalidate = [this]
     {
         m_connectionVerified = false;
+        m_connectionFailed = false;
         m_connectionReport.clear();
         m_copyConnectionReport->setEnabled(false);
         if (m_pages->currentIndex() == 3)
@@ -502,6 +629,69 @@ void SetupWindow::updateActions()
     else
         enabled = page == 3 ? m_connectionVerified : !m_identity.publicKey.isEmpty();
     m_next->setEnabled(enabled && !m_busy && !m_preview);
+    if (!m_homeMode && page == 2)
+        m_next->setText(tr("已完成授权，下一步"));
+    updateSteps();
+}
+
+void SetupWindow::updateSteps()
+{
+    if (m_homeMode)
+        return;
+    const bool completed[] = {m_environmentReady, !m_identity.publicKey.isEmpty(),
+                              m_authorizationAcknowledged, m_connectionVerified};
+    const bool failed[] = {m_environmentFailed, m_identityFailed, false, m_connectionFailed};
+    const QStringList pending{tr("检查连接组件"), tr("准备专用密钥"), tr("导入本机公钥"), tr("验证远程访问")};
+    const QStringList done{tr("客户端可用"), tr("身份已准备好"),
+                           m_connectionVerified ? tr("授权已通过连接验证") : tr("已声明授权，待验证"),
+                           tr("连接测试通过")};
+    for (int index = 0; index < m_stepRows.size(); ++index)
+    {
+        const bool current = index == m_pages->currentIndex();
+        const QString state = failed[index]      ? QStringLiteral("failed")
+                              : completed[index] ? QStringLiteral("complete")
+                                                 : QStringLiteral("pending");
+        auto *row = m_stepRows[index];
+        row->setProperty("current", current);
+        row->setProperty("state", state);
+        auto *badge = m_stepBadges[index];
+        badge->setProperty("state", state);
+        badge->setProperty("current", current);
+        badge->setText(QString::number(index + 1));
+        if (completed[index] && !failed[index])
+            badge->setPixmap(QIcon(QStringLiteral(":/resources/icon/common/check.svg")).pixmap(20, 20));
+        if (failed[index])
+            badge->setPixmap(QIcon(QStringLiteral(":/resources/icon/setup/error.svg")).pixmap(20, 20));
+        const QString description = m_busy && current  ? tr("正在处理…")
+                                    : failed[index]    ? tr("未通过，请重试")
+                                    : completed[index] ? done.at(index)
+                                                       : pending.at(index);
+        m_stepDescriptions[index]->setText(description);
+        row->setAccessibleName(tr("步骤 %1：%2").arg(index + 1).arg(description));
+        for (auto *widget : {row, static_cast<QWidget *>(badge)})
+        {
+            widget->style()->unpolish(widget);
+            widget->style()->polish(widget);
+            widget->update();
+        }
+        if (index < m_stepLines.size())
+        {
+            auto *line = m_stepLines[index];
+            line->setProperty("complete", completed[index] && !failed[index]);
+            line->style()->unpolish(line);
+            line->style()->polish(line);
+            line->update();
+        }
+    }
+}
+
+void SetupWindow::invalidateIdentityResults()
+{
+    m_authorizationAcknowledged = false;
+    m_connectionVerified = false;
+    m_connectionFailed = false;
+    m_connectionReport.clear();
+    m_copyConnectionReport->setEnabled(false);
 }
 
 void SetupWindow::showFeedback(const QString &message, bool error)
@@ -568,6 +758,7 @@ void SetupWindow::inspectEnvironment()
         [this, result]
         {
             m_environmentReady = result->sshAvailable;
+            m_environmentFailed = !m_environmentReady;
             m_environmentText->setText(tr("OpenSSH 客户端：%1\n\nTailscale：%2\n\n%3")
                                            .arg(result->sshAvailable ? tr("可用") : tr("未找到"),
                                                 result->tailscaleOnline ? tr("在线") : tr("尚未确认在线"),
@@ -603,14 +794,14 @@ void SetupWindow::prepareIdentity(const QString &existingPath)
         },
         [this, result]
         {
+            invalidateIdentityResults();
+            m_identityFailed = !result->success;
             if (!result->success)
             {
                 m_identity = {};
                 m_publicKeyPreview->clear();
                 m_publicSummary->setText(tr("尚未准备公钥"));
-                m_connectionVerified = false;
-                m_connectionReport.clear();
-                m_copyConnectionReport->setEnabled(false);
+
                 m_identityText->setText(tr("身份尚未准备好。请解决下方问题后重试。"));
                 showFeedback(result->error, true);
                 return;
@@ -618,9 +809,7 @@ void SetupWindow::prepareIdentity(const QString &existingPath)
             m_identity = result->identity;
             m_publicKeyPreview->setPlainText(m_identity.publicKey);
             m_profile.identityFile = m_identity.privateKeyPath;
-            m_connectionVerified = false;
-            m_connectionReport.clear();
-            m_copyConnectionReport->setEnabled(false);
+
             m_identityText->setText(tr("本机身份已准备好\n\n公钥指纹：%1\n\n私钥文件：%2")
                                         .arg(m_identity.fingerprint, m_identity.privateKeyPath));
             m_publicSummary->setText(tr("本机设备：%1\n\n公钥指纹：%2")
@@ -722,6 +911,7 @@ void SetupWindow::checkConnection()
                  [this, result]
                  {
                      m_connectionVerified = result->authenticated && result->claudeAvailable;
+                     m_connectionFailed = !m_connectionVerified;
                      m_connectionReport = formatConnectionReport(*result);
                      m_copyConnectionReport->setEnabled(true);
                      showFeedback(m_connectionReport, !m_connectionVerified);
@@ -812,6 +1002,8 @@ void SetupWindow::next()
         close();
         return;
     }
+    if (!m_homeMode && page == 2)
+        m_authorizationAcknowledged = true;
     setPage(page + 1);
     if (!m_homeMode && page == 0 && m_identity.publicKey.isEmpty() &&
         (m_legacyConfigPath.isEmpty() || !QFile::exists(m_legacyConfigPath)))

@@ -19,6 +19,8 @@ class QStackedWidget;
 class QThread;
 class QVBoxLayout;
 
+class SetupWindowTests;
+
 namespace sshsetup
 {
 
@@ -36,6 +38,7 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
+    friend class ::SetupWindowTests;
     void buildUi();
     QWidget *makePage(const QString &title, const QString &description, QVBoxLayout *&layout);
     void buildEnvironmentPage();
@@ -47,6 +50,8 @@ private:
     void buildResultPage();
     void setPage(int page);
     void updateActions();
+    void updateSteps();
+    void invalidateIdentityResults();
     void showFeedback(const QString &message, bool error = false);
     void runOperation(std::function<void()> work, std::function<void()> finished);
     void inspectEnvironment();
@@ -66,6 +71,10 @@ private:
     bool m_environmentReady = false;
     bool m_authorized = false;
     bool m_connectionVerified = false;
+    bool m_authorizationAcknowledged = false;
+    bool m_environmentFailed = false;
+    bool m_identityFailed = false;
+    bool m_connectionFailed = false;
     QString m_profilePath;
     QString m_legacyConfigPath;
     QString m_normalizedKey;
@@ -78,6 +87,10 @@ private:
     QThread *m_worker = nullptr;
     QStackedWidget *m_pages = nullptr;
     QVector<QLabel *> m_steps;
+    QVector<QWidget *> m_stepRows;
+    QVector<QLabel *> m_stepBadges;
+    QVector<QLabel *> m_stepDescriptions;
+    QVector<QWidget *> m_stepLines;
     QLabel *m_feedback = nullptr;
     QLabel *m_environmentText = nullptr;
     QLabel *m_identityText = nullptr;

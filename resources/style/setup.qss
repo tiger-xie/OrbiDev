@@ -1,4 +1,19 @@
-/* 沿用向导现有角色；步骤轨道与分区布局在后续任务实现。 */
+/* 家庭端仍沿用原步骤；公司端按实际业务状态显示轨道。 */
 QWidget#stepRail { background: #1d2730; border-right: 1px solid #34424e; }
 QLabel[role="step"] { padding: 18px 12px; color: #a8b5c0; border-left: 3px solid transparent; }
 QLabel[role="currentStep"] { padding: 18px 12px; background: #213e47; color: #f2ffff; border-left: 3px solid #00b7b5; }
+QWidget[role="setupStep"] { border-left: 3px solid transparent; }
+QWidget[role="setupStep"][current="true"] { background: #213b44; border-left: 3px solid #00b7b5; }
+QLabel[role="stepName"] { font-size: 16px; font-weight: 600; }
+QLabel[role="stepBadge"] { border: 2px solid #647580; border-radius: 16px; color: #becbd3; font-size: 16px; }
+QLabel[role="stepBadge"][current="true"] { border-color: #24d4ce; color: #ffffff; }
+QLabel[role="stepBadge"][state="complete"] { background: #009c98; border-color: #00b7b5; }
+QLabel[role="stepBadge"][state="failed"] { background: #321e25; border-color: #ff5b67; }
+QWidget[role="stepLine"] { background: #3d4d58; }
+QWidget[role="stepLine"][complete="true"] { background: #00a5a2; }
+QWidget#clientSetupPage QLabel[role="title"] { font-size: 28px; font-weight: 600; }
+QWidget#clientSetupPage QLabel[role="muted"] { color: #a8b5c0; }
+QWidget[role="setupCard"] { background: #19232b; border: 1px solid #34424e; border-radius: 7px; }
+QLabel[role="instructionNumber"] { background: #00b7b5; color: #092428; border-radius: 14px; font-size: 16px; }
+QWidget#setupFooter { background: #1a252d; border-top: 1px solid #34424e; }
+QWidget#setupFooter QPushButton { min-width: 104px; min-height: 24px; }

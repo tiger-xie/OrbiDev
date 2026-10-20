@@ -8,6 +8,8 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -36,7 +38,86 @@ private slots:
             const QIcon icon(QStringLiteral(":/resources/icon/common/%1.svg").arg(QString::fromLatin1(name)));
             QVERIFY(!icon.pixmap(24, 24).isNull());
         }
+        for (const auto *name : {"copy", "export", "error"})
+        {
+            const QIcon icon(QStringLiteral(":/resources/icon/setup/%1.svg").arg(QString::fromLatin1(name)));
+            QVERIFY(!icon.pixmap(24, 24).isNull());
+        }
         QVERIFY(!qApp->windowIcon().isNull());
+    }
+
+    void clientStepsFollowResultsRatherThanPageIndex()
+    {
+        QTemporaryDir directory;
+        sshsetup::SetupWindow window(false, directory.filePath(QStringLiteral("connection.json")));
+        window.setPage(3);
+        for (int index = 0; index < 4; ++index)
+            QCOMPARE(window.m_stepRows[index]->property("state").toString(), QStringLiteral("pending"));
+        window.m_environmentReady = true;
+        window.m_identity.publicKey = QStringLiteral("仅用于状态测试的占位内容");
+        window.setPage(2);
+        QCOMPARE(window.m_stepRows[0]->property("state").toString(), QStringLiteral("complete"));
+        QCOMPARE(window.m_stepRows[1]->property("state").toString(), QStringLiteral("complete"));
+        QCOMPARE(window.m_stepRows[2]->property("state").toString(), QStringLiteral("pending"));
+        window.next();
+        QVERIFY(window.m_authorizationAcknowledged);
+        QVERIFY(!window.m_connectionVerified);
+        QVERIFY(window.m_stepDescriptions[2]->text().contains(QStringLiteral("待验证")));
+        window.m_connectionFailed = true;
+        window.updateActions();
+        QCOMPARE(window.m_stepRows[3]->property("state").toString(), QStringLiteral("failed"));
+        window.m_connectionVerified = true;
+        window.m_connectionFailed = false;
+        window.updateActions();
+        window.showFeedback(QStringLiteral("导出失败"), true);
+        QCOMPARE(window.m_stepRows[3]->property("state").toString(), QStringLiteral("complete"));
+        window.invalidateIdentityResults();
+        window.updateActions();
+        QVERIFY(!window.m_authorizationAcknowledged);
+        QVERIFY(!window.m_connectionVerified);
+        QCOMPARE(window.m_stepRows[2]->property("state").toString(), QStringLiteral("pending"));
+        QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("connection.json"))));
+    }
+
+    void clientPreviewIsInertAndFitsNarrowWindow()
+    {
+        QTemporaryDir directory;
+        sshsetup::SetupWindow window(false, directory.filePath(QStringLiteral("connection.json")), {}, true);
+        window.resize(880, 620);
+        window.show();
+        for (int page = 0; page < 4; ++page)
+        {
+            window.setPreviewPage(page);
+            QTest::qWait(30);
+            QVERIFY(!window.m_pages->isEnabled());
+            QVERIFY(!window.m_next->isEnabled());
+            QCOMPARE(window.m_pages->currentIndex(), page);
+            for (auto *step : window.m_stepRows)
+                QCOMPARE(step->property("state").toString(), QStringLiteral("pending"));
+            for (int index = 0; index < window.m_stepRows.size(); ++index)
+            {
+                const auto *badge = window.m_stepBadges[index];
+                const auto *description = window.m_stepDescriptions[index];
+                QVERIFY(badge->geometry().right() < description->geometry().left());
+            }
+            auto *scroll = qobject_cast<QScrollArea *>(window.m_pages->currentWidget());
+            QVERIFY(scroll);
+            QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+            const QRect nextRect(window.m_next->mapTo(&window, QPoint()), window.m_next->size());
+            const QRect backRect(window.m_back->mapTo(&window, QPoint()), window.m_back->size());
+            QVERIFY(window.rect().contains(nextRect));
+            QVERIFY(window.rect().contains(backRect));
+            QVERIFY(!nextRect.intersects(backRect));
+        }
+        window.m_publicSummary->setText(QString(300, QLatin1Char('A')));
+        window.setPreviewPage(2);
+        window.m_publicSummary->setText(QString(300, QLatin1Char('A')));
+        QTest::qWait(30);
+        QCOMPARE(
+            qobject_cast<QScrollArea *>(window.m_pages->currentWidget())->horizontalScrollBar()->maximum(),
+            0);
+        QVERIFY(window.m_identity.publicKey.isEmpty());
+        QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("connection.json"))));
     }
 
     void initialStateCannotSkipChecks()

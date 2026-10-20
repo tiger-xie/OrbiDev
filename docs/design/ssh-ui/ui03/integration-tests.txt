@@ -1,0 +1,12 @@
+Internal ctest changing into directory: E:/Codex/Project/OrbiDev/build-ssh-workbench
+Test project E:/Codex/Project/OrbiDev/build-ssh-workbench
+    Start  2: workbench.WorkbenchWindow
+1/3 Test  #2: workbench.WorkbenchWindow ........   Passed   36.38 sec
+    Start  5: workbench.HostDialog
+2/3 Test  #5: workbench.HostDialog .............   Passed    0.86 sec
+    Start 11: setup.ui
+3/3 Test #11: setup.ui .........................   Passed    3.36 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Total Test time (real) =  41.02 sec

@@ -11,5 +11,8 @@
     <file alias="icon/window/close.svg">resources/icon/window/close.svg</file>
     <file alias="icon/window/minimize.svg">resources/icon/window/minimize.svg</file>
     <file alias="icon/window/restore.svg">resources/icon/window/restore.svg</file>
+    <file alias="icon/setup/copy.svg">resources/icon/setup/copy.svg</file>
+    <file alias="icon/setup/export.svg">resources/icon/setup/export.svg</file>
+    <file alias="icon/setup/error.svg">resources/icon/setup/error.svg</file>
   </qresource>
 </RCC>
