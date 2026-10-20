@@ -62,6 +62,27 @@ private:
     }
 
 private slots:
+    void freshConfigurationRestartStaysDisconnected()
+    {
+        QTemporaryDir directory;
+        const auto profile = directory.filePath(QStringLiteral("connection.json"));
+        const auto projects = directory.filePath(QStringLiteral("projects.json"));
+        {
+            sshworkbench::WorkbenchWindow firstRun(profile, projects);
+            QVERIFY(firstRun.m_state.hosts.isEmpty());
+            QVERIFY(firstRun.m_state.projects.projects.isEmpty());
+            QVERIFY(firstRun.close());
+        }
+        sshworkbench::WorkbenchWindow secondRun(profile, projects);
+        QCOMPARE(secondRun.m_tabs->count(), 0);
+        QVERIFY(secondRun.findChildren<sshworkbench::SshSession *>().isEmpty());
+        QVERIFY(!secondRun.m_newTerminal->isEnabled());
+        QVERIFY(!QFile::exists(profile));
+        QVERIFY(!QFile::exists(secondRun.m_statePath));
+        QVERIFY(QFile::exists(projects + QStringLiteral(".preferences.json")));
+        QVERIFY(secondRun.close());
+    }
+
     void maximizedPreferenceKeepsNormalGeometry()
     {
         QTemporaryDir directory;

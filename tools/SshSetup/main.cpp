@@ -14,12 +14,14 @@ int main(int argc, char *argv[])
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     QApplication application(argc, argv);
+    QApplication::setApplicationVersion(QStringLiteral(ORBIDEV_VERSION));
     QApplication::setApplicationName(QStringLiteral("OrbiDevSshSetup"));
     QApplication::setOrganizationName(QStringLiteral("OrbiDev"));
     sshsetup::applySetupTheme(application);
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("OrbiDev SSH 首次配置与家庭端授权工具"));
     parser.addHelpOption();
+    parser.addVersionOption();
     parser.addOption({QStringLiteral("home"), QStringLiteral("打开家庭端授权工具")});
     parser.addOption(
         {QStringLiteral("config"), QStringLiteral("客户端连接配置文件"), QStringLiteral("path")});
@@ -40,6 +42,7 @@ int main(int argc, char *argv[])
                                       QStringLiteral("/connection.json");
     const bool preview = parser.isSet(QStringLiteral("screenshot"));
     sshsetup::SetupWindow window(homeMode, profile, parser.value(QStringLiteral("legacy-config")), preview);
+    window.setWindowTitle(window.windowTitle() + QStringLiteral(" · ") + QApplication::applicationVersion());
     if (preview)
         window.setPreviewPage(parser.value(QStringLiteral("page")).toInt());
     window.show();

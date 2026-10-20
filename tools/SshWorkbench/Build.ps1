@@ -1,4 +1,4 @@
-﻿param([string]$QtRoot = $env:QTDIR, [ValidateSet('Debug','Release')][string]$Configuration = 'Release')
+﻿param([string]$QtRoot = $env:QTDIR, [ValidateSet('Debug','Release')][string]$Configuration = 'Release', [switch]$Candidate)
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if (-not $QtRoot) { $QtRoot = 'D:/Qt/5.15.2/msvc2019_64' }
@@ -17,36 +17,18 @@ if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 $ctestPath = Join-Path (Split-Path $cmakePath) 'ctest.exe'
 & $ctestPath --test-dir $buildDirectory -C $Configuration --output-on-failure
-if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
-$packageDirectory = Join-Path $buildDirectory "package-$Configuration"
-New-Item -ItemType Directory -Force -Path $packageDirectory | Out-Null
-foreach ($script in @('Start-SshService.cmd', 'Start-SshService.ps1')) {
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "../SshSetup/$script") -Destination $packageDirectory -Force
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "../SshSetup/$script") -Destination (Join-Path $buildDirectory $Configuration) -Force
+$testStatus = if ($LASTEXITCODE -eq 0) { 'Passed' } else { 'Failed' }
+if ($testStatus -eq 'Failed' -and -not $Candidate) { throw '测试失败；停止打包。明确指定 -Candidate 才能生成标记失败的验证包。' }
+# 保持仓库启动器可用；便携包仍从白名单重新部署。
+$localDirectory = Join-Path $buildDirectory $Configuration
+foreach ($application in @('OrbiDevSetup','OrbiDevHomeSetup')) {
+    Copy-Item -LiteralPath (Join-Path $buildDirectory "setup/$Configuration/$application.exe") -Destination $localDirectory -Force
+}
+foreach ($script in @('Start-SshService.cmd','Start-SshService.ps1')) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "../SshSetup/$script") -Destination $localDirectory -Force
 }
 foreach ($application in @('OrbiDevWorkbench','OrbiDevSetup','OrbiDevHomeSetup')) {
-    $executable = Join-Path $buildDirectory $(if ($application -eq 'OrbiDevWorkbench') { "$Configuration/$application.exe" } else { "setup/$Configuration/$application.exe" })
-    & (Join-Path $QtRoot 'bin/windeployqt.exe') "--$($Configuration.ToLowerInvariant())" --no-translations $executable
-    if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed.' }
-    Copy-Item -LiteralPath $executable -Destination $packageDirectory -Force
-    if ($application -ne 'OrbiDevWorkbench') {
-        Copy-Item -LiteralPath $executable -Destination (Join-Path $buildDirectory $Configuration) -Force
-    }
-    & (Join-Path $QtRoot 'bin/windeployqt.exe') "--$($Configuration.ToLowerInvariant())" --no-translations (Join-Path $packageDirectory "$application.exe")
-    if ($LASTEXITCODE -ne 0) { throw 'Package deployment failed.' }
+    & (Join-Path $QtRoot 'bin/windeployqt.exe') "--$($Configuration.ToLowerInvariant())" --no-translations (Join-Path $localDirectory "$application.exe")
+    if ($LASTEXITCODE -ne 0) { throw '本机构建目录 Qt 部署失败。' }
 }
-Copy-Item -LiteralPath (Join-Path $workspace 'docs/SSH首次配置与家庭授权_使用说明.md') -Destination $packageDirectory -Force
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-$installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-$runtime = Get-ChildItem -Path (Join-Path $installation 'VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT') -Directory | Sort-Object FullName -Descending | Select-Object -First 1
-if (-not $runtime) { throw 'MSVC x64 runtime was not found; portable package is incomplete.' }
-Get-ChildItem -LiteralPath $runtime.FullName -Filter '*.dll' | Copy-Item -Destination $packageDirectory -Force
-Copy-Item -LiteralPath (Join-Path $buildDirectory "$Configuration/conpty.dll") -Destination $packageDirectory -Force
-Copy-Item -LiteralPath (Join-Path $buildDirectory "$Configuration/x64") -Destination $packageDirectory -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $workspace 'third_party/ConPTY-LICENSE.txt') -Destination $packageDirectory -Force
-foreach ($license in @('xterm-LICENSE.txt', 'fit-LICENSE.txt')) {
-    Copy-Item -LiteralPath (Join-Path $workspace "frontend/terminal/vendor/$license") -Destination $packageDirectory -Force
-}
-Copy-Item -LiteralPath (Join-Path $workspace 'docs/SSH内嵌工作台_使用与验证说明.md') -Destination $packageDirectory -Force
-Compress-Archive -Path (Join-Path $packageDirectory '*') -DestinationPath (Join-Path $buildDirectory "OrbiDev-SshWorkbench-$Configuration.zip") -Force
-Write-Host "Ready: $packageDirectory. Run OrbiDevWorkbench.exe on the client computer."
+& (Join-Path $PSScriptRoot 'Package.ps1') -QtRoot $QtRoot -Configuration $Configuration -BuildDirectory $buildDirectory -TestStatus $testStatus

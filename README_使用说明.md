@@ -1,6 +1,19 @@
-# RADManager · 开发计划资料包
+# OrbiDev · SSH 工作台
 
-## 本机快速启动
+当前开发方向为 Qt 内嵌 SSH 工作台，通过 Tailscale 连接家庭电脑上的 Claude。原 RADManager Client/Agent 暂停开发，代码与历史资料保留。关闭客户端或断线不保证远程任务继续运行。
+
+## 当前启动入口
+
+- 本机开发版：构建 Release 后双击根目录 **Start-OrbiDev.cmd**；原 Start-SshWorkbench.cmd 保留兼容。
+- 候选便携包：解压后双击包内 **Start-OrbiDev.cmd**。首次使用通过“连接设置”运行配置向导。
+- 家庭电脑只需使用包内 **Start-HomeSetup.cmd** 做一次公钥授权；日常连接不要求家庭配置工具常驻。
+- 当前版本为 **0.1.0-preview**，属于候选验证版。版本可在标题栏、`--version` 或工作台“连接设置 → 关于 SSH 工作台”查看。
+
+使用与迁移见 [SSH 工作台说明](docs/SSH内嵌工作台_使用与验证说明.md)，候选包与未完成验收见 [发布与升级说明](docs/SSH工作台_发布与升级说明.md)。Windows 11、真实双端稳定性及既有 Qt／剪贴板验证缺口尚未全部关闭，不按正式发布宣传。
+
+以下为暂停的 Client/Agent 历史资料，不是当前 SSH 工作台的启动流程。
+
+## 历史 Client/Agent 启动（暂停）
 
 编译 Debug 后，在仓库根目录先双击 **[Start-RemoteAgent.cmd](Start-RemoteAgent.cmd)**，保留窗口，再双击 **[Start-RemoteClient.cmd](Start-RemoteClient.cmd)**。Client 打开后点击“连接”→“新建会话”，即可验证真实 FakeCli 终端。脚本自动处理 Qt 路径、联调配置与设备令牌，无需手填参数。Release 启动和详细步骤见 [启动说明](docs/M4-02_远程终端集成.md#推荐本机双击启动)。
 

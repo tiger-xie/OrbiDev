@@ -27,6 +27,7 @@ target_include_directories(WorkbenchUi PUBLIC . "${ORBIDEV_ROOT}/apps/RemoteClie
 target_link_libraries(WorkbenchUi PUBLIC WorkbenchCore SshSetupUi Qt5::WebEngineWidgets PRIVATE Qt5::WebChannel)
 setup_target(WorkbenchUi)
 add_executable(OrbiDevWorkbench WIN32 main.cpp)
+target_compile_definitions(OrbiDevWorkbench PRIVATE ORBIDEV_VERSION="${PROJECT_VERSION}-preview")
 target_link_libraries(OrbiDevWorkbench PRIVATE WorkbenchUi)
 setup_target(OrbiDevWorkbench)
 

@@ -13,6 +13,7 @@ int main(int argc, char *argv[])
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     QApplication application(argc, argv);
+    QApplication::setApplicationVersion(QStringLiteral(ORBIDEV_VERSION));
     QApplication::setOrganizationName(QStringLiteral("OrbiDev"));
     QApplication::setApplicationName(QStringLiteral("OrbiDevSshSetup"));
     const QString setupPath = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) +
@@ -22,6 +23,7 @@ int main(int argc, char *argv[])
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("OrbiDev 内嵌 SSH 工作台"));
     parser.addHelpOption();
+    parser.addVersionOption();
     parser.addOption(
         {QStringLiteral("config"), QStringLiteral("首次设置保存的连接文件"), QStringLiteral("path")});
     parser.addOption(
@@ -40,6 +42,7 @@ int main(int argc, char *argv[])
     const bool preview = parser.isSet(QStringLiteral("screenshot"));
     sshworkbench::WorkbenchWindow window(profile, projects, parser.value(QStringLiteral("legacy-config")),
                                          preview);
+    window.setWindowTitle(window.windowTitle() + QStringLiteral(" · ") + QApplication::applicationVersion());
     window.show();
     if (preview)
     {

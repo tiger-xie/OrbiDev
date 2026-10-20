@@ -3,6 +3,7 @@
 #include "SshSession.h"
 #include "terminal/TerminalView.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -280,6 +281,21 @@ void WorkbenchWindow::buildUi()
     hostMenu->addAction(tr("首次配置向导（当前主机）…"), this, &WorkbenchWindow::openSetup);
     hostMenu->addSeparator();
     hostMenu->addAction(tr("移除当前主机…"), this, &WorkbenchWindow::removeHost);
+    hostMenu->addSeparator();
+    auto *about = hostMenu->addAction(
+        tr("关于 SSH 工作台…"), this,
+        [this]
+        {
+            QMessageBox::about(
+                this, tr("关于 OrbiDev SSH 工作台"),
+                tr("OrbiDev SSH 工作台 %1\nQt %2 · Windows x64\n\n"
+                   "候选验证版，完整发布验收尚未完成。\n"
+                   "通过 SSH 操作家庭电脑上的 Claude；原 Client/Agent 暂停开发。\n"
+                   "关闭客户端或断线不保证远程任务继续运行。\n\n"
+                   "版本与依赖清单见包内 manifest.json，已知限制见发布说明。")
+                    .arg(QCoreApplication::applicationVersion(), QString::fromLatin1(qVersion())));
+        });
+    about->setObjectName(QStringLiteral("aboutWorkbenchAction"));
     settings->setMenu(hostMenu);
     toolbar->addWidget(settings);
     auto *appearance = new QPushButton(tr("外观…"), central);

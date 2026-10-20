@@ -20,6 +20,7 @@ target_link_libraries(SshSetupUi PUBLIC SshSetupCore Qt5::Widgets PRIVATE shell3
 setup_target(SshSetupUi)
 foreach(app IN ITEMS OrbiDevSetup OrbiDevHomeSetup)
     add_executable(${app} WIN32 main.cpp)
+    target_compile_definitions(${app} PRIVATE ORBIDEV_VERSION="${PROJECT_VERSION}-preview")
     target_link_libraries(${app} PRIVATE SshSetupUi)
     setup_target(${app})
 endforeach()
