@@ -16,7 +16,13 @@
 - 独立工作区的 `8f1ba08` 源码 Release 全量构建通过（MSVC `/W4 /WX /analyze`），完整 CTest **14/14，65.83 秒**；该工作区没有原目录的阶段诊断改动。版本统一为 `0.1.0-preview.1` 后再次构建通过。
 - 发布版本首轮回归 **12/14，128.74 秒**：SshSession 的内嵌终端往返和 terminal 的 UTF-8/ANSI 用例在初始化时超时，其余套件通过。当时存在 Git 压缩推送活动，未证明因果。后台活动结束后独占完整复测 **14/14，42.61 秒**。原始失败日志保留，不以复测覆盖或宣称根因修复。
 - 三个 Release 程序的实际 `--version` 输出均已核对为 `0.1.0-preview.1`。
-- 便携运行验证结果将在完成后补充；未完成前不标记通过。
+- Windows PowerShell 5.1 与 PowerShell 7 的打包验证均 **16/16**，覆盖中文 UTF8 无 BOM 清单、公开包门槛、哈希及许可索引缺失拒绝。实际预发布包 **1838 项文件校验通过**。
+- 从干净提交 `6a2b3c0` 打包，在独立副本追加同一构建的测试程序、FakeCli 和 Qt5Test；原包保持不变。PATH 仅保留 Windows 系统目录，并清除继承的 Qt/QML 环境。终端与 SshSession 两套件各运行三轮，**6/6 退出码为 0**，没有超时。覆盖终端 ANSI/UTF-8、输入、剪贴板、尺寸、销毁与 ConPTY 往返。
+- 上述测试仍使用既有的后台定时器测试参数，不等同真实 Claude 长期交互；没有连接家庭主机。结果不撤销本轮及历史初始化超时。
+- 同一便携副本的工作台、首次设置、家庭端工具均在 100%／150% 生成并检查截图。版本一致，标题、导航与底部操作可见；家庭端长内容使用滚动区域。截图为明确标识的虚构预览，不含真实连接信息。
+- 完成验证后仅补充发布文档，最终包重新生成清单；发布前核对程序及运行库与已验证包一致。最终提交和 ZIP 校验值以包内 `manifest.json`、Git 标签及附件 `.sha256` 为准。
+
+本轮证据保存在独立工作区的 `build-release/`：`ctest-baseline.log`、`ctest-publication-first-failure.log`、两份 `*-publication-first-failure.txt`、`ctest-release-isolated.log`、`portable-runtime.log`、`runtime-validation/` 与 `portable-visual/`。不把开发日志或真实配置上传到发行附件。
 
 ## 用户可观察的风险
 
