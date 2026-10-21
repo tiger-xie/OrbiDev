@@ -22,6 +22,7 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTabBar>
@@ -71,6 +72,47 @@ private:
     }
 
 private slots:
+    void hostPopupOpensBelowSelector()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath(QStringLiteral("profile.json")),
+                                             directory.filePath(QStringLiteral("projects.json")), {}, true);
+        window.resize(920, 600);
+        window.show();
+        auto *selector = window.findChild<QComboBox *>(QStringLiteral("hostSelector"));
+        QVERIFY(selector);
+        selector->setEnabled(true);
+        {
+            const QSignalBlocker blocker(selector);
+            selector->clear();
+            selector->addItems({QStringLiteral("家庭笔记本"), QStringLiteral("家庭台式机")});
+            selector->setCurrentIndex(1);
+        }
+        QTest::qWait(100);
+        selector->showPopup();
+        auto *popup = selector->view()->window();
+        QTRY_VERIFY(popup->isVisible());
+        QTest::qWait(100);
+        QCOMPARE(selector->count(), 2);
+        QVERIFY(selector->view()->viewport()->rect().contains(
+            selector->view()->visualRect(selector->model()->index(0, 0))));
+        const int bottom = selector->mapToGlobal(QPoint(0, selector->height())).y();
+        QVERIFY(popup->geometry().top() >= bottom - 1);
+        QVERIFY(popup->geometry().top() <= bottom + 2);
+        const auto screenshot = qEnvironmentVariable("ORBIDEV_HOST_POPUP_SCREENSHOT");
+        if (!screenshot.isEmpty())
+        {
+            QPixmap capture = window.grab();
+            QPainter painter(&capture);
+            painter.drawPixmap(window.mapFromGlobal(popup->pos()), popup->grab());
+            painter.end();
+            QVERIFY(capture.save(screenshot));
+        }
+        QTest::keyClick(selector->view(), Qt::Key_Escape);
+        QTRY_VERIFY(!popup->isVisible());
+        QCOMPARE(selector->currentIndex(), 1);
+        QVERIFY(window.close());
+    }
     void settingsPopupStaysInsideWindowAndBelowButton()
     {
         QTemporaryDir directory;

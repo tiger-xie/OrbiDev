@@ -974,7 +974,8 @@ void WorkbenchWindow::editProject(bool add)
     dialog.setWindowTitle(add ? tr("新建项目") : tr("编辑项目"));
     dialog.resize(600, 520);
     auto *layout = new QVBoxLayout(&dialog);
-    layout->setContentsMargins(0, 0, 0, 0);
+    // 为外框保留绘制空间，避免标题栏和底栏覆盖窗口边界。
+    layout->setContentsMargins(1, 1, 1, 1);
     layout->setSpacing(0);
     layout->addWidget(new sshsetup::WindowFrame(&dialog, true));
     auto *scroll = new QScrollArea(&dialog);
