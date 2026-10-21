@@ -44,6 +44,8 @@ ConPTY 从官方 NuGet 下载固定版本并校验 SHA-256；离线构建可通�
 
 `Build-SshWorkbench.cmd` 是本地构建、测试和候选打包入口，也可运行 `tools/SshWorkbench/Build.ps1 -QtRoot <Qt路径>`。测试失败默认停止打包；不要把候选失败包当作稳定发行版。普通开发启动使用 `Start-OrbiDev.cmd`。
 
+公开预览包使用 `tools/SshWorkbench/Package.ps1 -Kind prerelease -TestStatus Passed -ReleaseSourcesDirectory <源码准备目录>`，仅接受干净的 Release 工作区。先运行 `Prepare-ReleaseSources.ps1` 获取并校验对应 Qt 源码及许可集合；此开发步骤还需要带 lzma 的 Python 3，运行程序不需要 Python。发布时上传 `.release-assets.json` 列出的全部附件。便携运行验证使用 `Test-PortableRuntime.ps1`，在独立副本运行测试，不污染发行 ZIP。
+
 根目录 CMake 及 `apps/RemoteAgent` / `core` 中另有暂停的 Client/Agent 原型。它们不是本版工作台运行所需的服务；当前开发入口是 `tools/SshWorkbench`。
 
 ## 验证范围与限制
