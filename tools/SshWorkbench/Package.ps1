@@ -27,7 +27,7 @@ $sourceManifest = $null
 if ($Kind -eq 'prerelease') {
     if (-not $ReleaseSourcesDirectory) { throw '公开预览包必须指定 Prepare-ReleaseSources.ps1 生成的 ReleaseSourcesDirectory。' }
     $ReleaseSourcesDirectory = (Resolve-Path -LiteralPath $ReleaseSourcesDirectory).Path
-    $sourceManifest = Get-Content -LiteralPath (Join-Path $ReleaseSourcesDirectory 'source-manifest.json') -Raw | ConvertFrom-Json
+    $sourceManifest = Get-Content -LiteralPath (Join-Path $ReleaseSourcesDirectory 'source-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $expectedQtHash = '3a530d1b243b5dec00bc54937455471aaa3e56849d2593edb8ded07228202240'
     if ($sourceManifest.archive -ne 'qt-everywhere-src-5.15.2.tar.xz' -or $sourceManifest.sha256 -ne $expectedQtHash -or $sourceManifest.modifications -ne 'none' -or $sourceManifest.licenseCollection -ne 'qt-5.15.2-notices') { throw 'Qt 源码清单与本发布版本不匹配。' }
     if ((Get-FileHash -LiteralPath (Join-Path $ReleaseSourcesDirectory $sourceManifest.archive) -Algorithm SHA256).Hash -ne $expectedQtHash) { throw 'Qt 对应源码校验失败。' }

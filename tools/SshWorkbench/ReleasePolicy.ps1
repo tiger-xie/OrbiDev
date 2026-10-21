@@ -1,5 +1,5 @@
 ﻿function Get-OrbiDevPackageVersion([string]$VersionFile) {
-    $version = (Get-Content -LiteralPath $VersionFile -Raw).Trim()
+    $version = (Get-Content -LiteralPath $VersionFile -Raw -Encoding UTF8).Trim()
     if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') { throw 'VERSION 不是有效的发布版本。' }
     return $version
 }

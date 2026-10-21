@@ -12,7 +12,7 @@ $archive = Join-Path $OutputDirectory $name
 $checksum = Join-Path $OutputDirectory "$name.sha256"
 & curl.exe -fLsS --retry 3 --connect-timeout 30 --max-time 120 -o $checksum "$url.sha256"
 if ($LASTEXITCODE -ne 0) { throw '获取 Qt 官方 SHA256 失败。' }
-$official = Get-Content -LiteralPath $checksum -Raw
+$official = Get-Content -LiteralPath $checksum -Raw -Encoding UTF8
 if ($official -notmatch "(?i)\b$expectedHash\b") { throw 'Qt 官方 SHA256 与固定版本记录不一致。' }
 if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
     $partial = "$archive.partial"

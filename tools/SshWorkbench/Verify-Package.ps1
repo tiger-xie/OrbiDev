@@ -12,7 +12,7 @@ while ($pending.Count -gt 0) {
         if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
     }
 }
-$entries = @(Get-Content -LiteralPath (Join-Path $root 'SHA256.json') -Raw | ConvertFrom-Json)
+$entries = Get-Content -LiteralPath (Join-Path $root 'SHA256.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if (-not $entries.Count) { throw '文件校验列表为空。' }
 $seen = @{}
 foreach ($entry in $entries) {
@@ -31,15 +31,25 @@ foreach ($file in Get-ChildItem -LiteralPath $root -File -Recurse -Force) {
 }
 $manifestPath = Join-Path $root 'manifest.json'
 if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
-    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($manifest.packageStatus -eq 'prerelease') {
         . (Join-Path $PSScriptRoot 'ReleasePolicy.ps1')
         Assert-OrbiDevReleasePolicy 'prerelease' $manifest.configuration $manifest.testStatus ([bool]$manifest.dirty)
         foreach ($required in @('LICENSE','THIRD_PARTY_NOTICES.md','source-manifest.json','licenses/LICENSE.LGPLv3','licenses/LICENSE.GPLv3','licenses/LICENSE.LGPLv21','licenses/LICENSE.Chromium','licenses/qt-5.15.2-notices/index.json')) {
             if (-not (Test-Path -LiteralPath (Join-Path $root $required) -PathType Leaf)) { throw "公开包缺少许可或源码清单：$required" }
         }
-        $source = Get-Content -LiteralPath (Join-Path $root 'source-manifest.json') -Raw | ConvertFrom-Json
+        $source = Get-Content -LiteralPath (Join-Path $root 'source-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($source.archive -ne $manifest.sourceArchive -or $source.sha256 -ne '3a530d1b243b5dec00bc54937455471aaa3e56849d2593edb8ded07228202240') { throw '公开包的 Qt 源码清单不匹配。' }
+        $noticeRoot = Join-Path $root 'licenses/qt-5.15.2-notices'
+        $noticeIndex = Get-Content -LiteralPath (Join-Path $noticeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ([int]$source.licenseFileCount -lt 1 -or @($noticeIndex).Count -ne [int]$source.licenseFileCount) { throw 'Qt 许可索引数量与源码清单不一致。' }
+        $noticeNames = @{}
+        foreach ($notice in $noticeIndex) {
+            $name = [string]$notice.file
+            if ($name -notmatch '^\d{5}\.txt$' -or $noticeNames.ContainsKey($name)) { throw 'Qt 许可索引包含非法或重复文件名。' }
+            $noticeNames[$name] = $true
+            if (-not (Test-Path -LiteralPath (Join-Path $noticeRoot $name) -PathType Leaf)) { throw "Qt 许可索引指向缺失文件：$name" }
+        }
         if (Test-Path -LiteralPath (Join-Path $root 'Qt5Cored.dll')) { throw '公开 Release 包混入 Debug Qt 运行库。' }
     }
 }
