@@ -25,3 +25,8 @@ QDialog QSpinBox::down-arrow { image: url(:/resources/icon/common/chevron-down.s
 QToolButton#hostFingerprintToggle { background: transparent; color: #a8b5c0; border: 1px solid transparent; border-radius: 4px; padding: 6px; }
 QToolButton#hostFingerprintToggle:hover { background: #273943; color: #edf2f6; }
 QToolButton#hostFingerprintToggle:focus { border-color: #83f0ea; }
+/* 远程目录浏览使用独立列表表面，底栏保持可见。 */
+QListWidget#remoteDrives, QListWidget#remoteDirectories { background: #151e25; border: 1px solid #465560; border-radius: 4px; }
+QListWidget#remoteDrives::item, QListWidget#remoteDirectories::item { padding: 8px; }
+QListWidget#remoteDrives::item:selected, QListWidget#remoteDirectories::item:selected { background: #23464e; color: #ffffff; }
+QLabel#remoteDirectoryFeedback { color: #b9c9d2; }

@@ -44,3 +44,8 @@ QLabel#workbenchShortcuts { color: #a8b5c0; padding-right: 12px; }
 QPushButton#sessionHelpButton { color: #a8b5c0; background: transparent; border: none; border-left: 1px solid #34424e; border-radius: 0; padding: 4px 10px; }
 QPushButton#sessionHelpButton:hover { color: #36d4ce; }
 QLabel#terminalPreview { background: #0c1013; color: #a8b5c0; }
+QLabel#activeSessionLight { background: #78858d; border-radius: 5px; }
+QLabel#activeSessionLight[tone="running"] { background: #27c58a; }
+QLabel#activeSessionLight[tone="pending"] { background: #e6b650; }
+QLabel#activeSessionLight[tone="error"] { background: #ff5964; }
+QLabel#activeSessionLatency { color: #aebec8; }

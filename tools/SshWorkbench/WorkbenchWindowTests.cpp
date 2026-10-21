@@ -1,3 +1,6 @@
+#include "PingService.h"
+#include "RemoteDirectoryDialog.h"
+#include "RemoteDirectoryService.h"
 #include "SetupTheme.h"
 #include "SshSession.h"
 #include "WorkbenchWindow.h"
@@ -72,6 +75,87 @@ private:
     }
 
 private slots:
+    void directoryPickerSelectionAndCancel()
+    {
+        QTemporaryDir directory;
+        sshworkbench::WorkbenchWindow window(directory.filePath("profile.json"),
+                                             directory.filePath("projects.json"));
+        launcher::Project project{QStringLiteral("目录测试"), QStringLiteral("D:/Original"), true,
+                                  QUuid::createUuid().toString(QUuid::WithoutBraces)};
+        bindProject(window, project);
+        window.m_state.projects.projects = {project};
+        window.renderProjects();
+        QTimer::singleShot(
+            0, &window,
+            [&]
+            {
+                auto *dialog = window.findChild<QDialog *>(QStringLiteral("workbenchDialog"));
+                QVERIFY(dialog);
+                auto *path = dialog->findChild<QLineEdit *>(QStringLiteral("projectDirectory"));
+                auto *browse = dialog->findChild<QPushButton *>(QStringLiteral("browseRemoteDirectory"));
+                QVERIFY(path && browse);
+                const QString original = path->text();
+                for (bool accept : {false, true})
+                {
+                    QTimer::singleShot(
+                        0, dialog,
+                        [&, accept]
+                        {
+                            auto *picker = dialog->findChild<sshworkbench::RemoteDirectoryDialog *>();
+                            QVERIFY(picker);
+                            auto *service = picker->findChild<sshworkbench::RemoteDirectoryService *>();
+                            service->cancel();
+                            QTRY_VERIFY(!service->isBusy());
+                            if (accept)
+                            {
+                                sshworkbench::RemoteDirectoryResult result;
+                                result.success = true;
+                                result.currentPath = QStringLiteral("D:/中文 [项目]/Docs");
+                                emit service->finished(result);
+                                picker->findChild<QPushButton *>(QStringLiteral("selectRemoteDirectory"))
+                                    ->click();
+                            }
+                            else
+                                picker->reject();
+                        });
+                    browse->click();
+                    QCOMPARE(path->text(), accept ? QStringLiteral("D:/中文 [项目]/Docs") : original);
+                }
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+            });
+        window.editProject(false);
+        QCOMPARE(window.m_state.projects.projects.first().directory, QStringLiteral("D:/中文 [项目]/Docs"));
+    }
+    void activeSessionIndicatorTracksSelectedTab()
+    {
+        QTemporaryDir dir;
+        sshworkbench::WorkbenchWindow window(dir.filePath("profile.json"), dir.filePath("projects.json"), {},
+                                             true);
+        window.showPreviewTabs();
+        auto *page = window.m_tabs->currentWidget();
+        QVERIFY(page);
+        auto check = [&](const char *tone)
+        {
+            window.updateActiveSession();
+            QCOMPARE(window.m_statusLight->property("tone").toString(), QString::fromLatin1(tone));
+            QCOMPARE(window.m_latency->text(), QStringLiteral("Ping —"));
+        };
+        check("idle");
+        page->setProperty("sessionStarted", true);
+        check("running");
+        page->setProperty("sessionClosing", true);
+        check("pending");
+        page->setProperty("sessionClosing", false);
+        page->setProperty("sessionExited", true);
+        page->setProperty("sessionExitCode", 255);
+        check("error");
+        page->setProperty("sessionExitCode", 0);
+        check("idle");
+        page->setProperty("sessionError", QStringLiteral("失败"));
+        check("error");
+        window.m_tabs->setCurrentIndex(window.m_tabs->currentIndex() == 0 ? 1 : 0);
+        check("idle");
+    }
     void hostPopupOpensBelowSelector()
     {
         QTemporaryDir directory;
@@ -750,6 +834,8 @@ private slots:
         session->hostVerificationStarted();
         capture(QStringLiteral("verifying"));
         session->started();
+        window.m_ping->resultChanged(sshworkbench::PingService::State::Reachable, 12,
+                                     QStringLiteral("界面测试数据，未检测远程主机"));
         capture(QStringLiteral("running"));
         QCOMPARE(page->findChild<QScrollArea *>(QStringLiteral("terminalStatusDetails"))
                      ->verticalScrollBar()

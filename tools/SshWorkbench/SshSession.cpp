@@ -49,9 +49,11 @@ bool remoteCommandArguments(const QString &directory, QStringList &arguments, QS
         QStringLiteral("([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('%1')))")
             .arg(encodeScript(directory));
     const QString changeDirectory =
-        directory.isEmpty()
-            ? QStringLiteral("Set-Location -LiteralPath $HOME -ErrorAction Stop; ")
-            : QStringLiteral("Set-Location -LiteralPath %1 -ErrorAction Stop; ").arg(location);
+        QStringLiteral("$target=Get-Item -LiteralPath %1 -Force -ErrorAction Stop; "
+                       "if ($target.PSProvider.Name -ne 'FileSystem' -or !$target.PSIsContainer) "
+                       "{ throw 'Project path is not a filesystem directory' }; "
+                       "Set-Location -LiteralPath $target.FullName -ErrorAction Stop; ")
+            .arg(directory.isEmpty() ? QStringLiteral("$HOME") : location);
     const QString script = QStringLiteral("$ErrorActionPreference='Stop'; try { ") + changeDirectory +
                            QStringLiteral("$cli=Get-Command claude.exe -ErrorAction SilentlyContinue; "
                                           "if (!$cli) { $cli=Get-Command claude.cmd -ErrorAction Stop }; "
@@ -73,6 +75,7 @@ public:
     QByteArray input;
     QByteArray output;
     QString error;
+    QString resolvedHostPending;
     int columns = 120;
     int rows = 32;
     int exitCode = -1;
@@ -152,6 +155,11 @@ void SshSession::startProcess(const sshsetup::ConnectionProfile &profile, const 
                     if (!sshsetup::prepareSshArguments(profile, trustDirectory.path(), arguments, error,
                                                        true))
                         throw std::runtime_error(error.toUtf8().constData());
+                    {
+                        const QString target = arguments.last();
+                        std::lock_guard<std::mutex> lock(m_impl->mutex);
+                        m_impl->resolvedHostPending = target.mid(target.lastIndexOf(QLatin1Char('@')) + 1);
+                    }
                     arguments.append(command);
                     program =
                         qEnvironmentVariable("SystemRoot") + QStringLiteral("/System32/OpenSSH/ssh.exe");
@@ -302,12 +310,14 @@ void SshSession::poll()
 {
     QByteArray output;
     QString error;
+    QString resolvedHost;
     bool hostVerification = false, started = false, finished = false;
     int exitCode = -1;
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
         output.swap(m_impl->output);
         error.swap(m_impl->error);
+        resolvedHost.swap(m_impl->resolvedHostPending);
         hostVerification = m_impl->hostVerificationPending;
         m_impl->hostVerificationPending = false;
         started = m_impl->startedPending;
@@ -323,6 +333,10 @@ void SshSession::poll()
     const QPointer<SshSession> guard(this);
     if (hostVerification)
         emit hostVerificationStarted();
+    if (!guard)
+        return;
+    if (!resolvedHost.isEmpty())
+        emit remoteHostResolved(resolvedHost);
     if (!guard)
         return;
     if (started)

@@ -1,5 +1,7 @@
 #include "WorkbenchWindow.h"
 #include "HostDialog.h"
+#include "PingService.h"
+#include "RemoteDirectoryDialog.h"
 #include "SshSession.h"
 #include "WindowFrame.h"
 #include "terminal/TerminalView.h"
@@ -373,7 +375,9 @@ void WorkbenchWindow::buildUi()
     m_host = new QLabel(tr("尚未配置家庭电脑"), central);
     m_host->setObjectName(QStringLiteral("hostSummary"));
     m_host->setTextFormat(Qt::PlainText);
-    m_host->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_host->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    m_host->setMinimumWidth(0);
+    m_host->setMaximumWidth(400);
     m_hostSelector = new QComboBox(central);
     m_hostSelector->setObjectName(QStringLiteral("hostSelector"));
     m_hostSelector->setMinimumWidth(180);
@@ -382,7 +386,36 @@ void WorkbenchWindow::buildUi()
     m_hostSelector->setAccessibleName(tr("浏览家庭主机的项目"));
     m_hostSelector->setToolTip(tr("选择要浏览的主机；已有终端保留创建时的目标"));
     toolbar->addWidget(m_hostSelector);
-    toolbar->addWidget(m_host, 1);
+    auto *connectionSummary = new QWidget(central);
+    auto *connectionLayout = new QHBoxLayout(connectionSummary);
+    connectionLayout->setContentsMargins(0, 0, 0, 0);
+    connectionLayout->setSpacing(8);
+    m_statusLight = new QLabel(connectionSummary);
+    m_statusLight->setObjectName(QStringLiteral("activeSessionLight"));
+    m_statusLight->setFixedSize(10, 10);
+    m_latency = new QLabel(tr("Ping —"), connectionSummary);
+    m_latency->setObjectName(QStringLiteral("activeSessionLatency"));
+    connectionLayout->addWidget(m_host);
+    connectionLayout->addWidget(m_statusLight);
+    connectionLayout->addWidget(m_latency);
+    connectionLayout->addStretch(1);
+    toolbar->addWidget(connectionSummary, 1);
+    m_ping = new PingService(this);
+    connect(m_ping, &PingService::resultChanged, this,
+            [this](PingService::State state, int milliseconds, const QString &detail)
+            {
+                QString text = tr("Ping —");
+                if (state == PingService::State::Reachable)
+                    text = milliseconds == 0 ? tr("Ping <1 ms") : tr("Ping %1 ms").arg(milliseconds);
+                else if (state == PingService::State::Checking)
+                    text = tr("Ping 检测中");
+                else if (state == PingService::State::Timeout)
+                    text = tr("Ping 超时");
+                else if (state != PingService::State::Idle)
+                    text = tr("Ping 不可测");
+                m_latency->setText(text);
+                m_latency->setToolTip(detail + tr("\nICMP 延迟仅供参考；不可测不代表 SSH 断开。"));
+            });
     connect(m_hostSelector, qOverload<int>(&QComboBox::currentIndexChanged), this,
             [this](int index)
             {
@@ -1013,7 +1046,17 @@ void WorkbenchWindow::editProject(bool add)
     hostChoice->setCurrentIndex(hostChoice->findData(
         add ? m_state.currentHostId : m_state.projectHosts.value(m_state.projects.projects[row].id)));
     form->addRow(tr("家庭主机"), hostChoice);
-    form->addRow(tr("远程目录"), directory);
+    auto *directoryRow = new QWidget(body);
+    auto *directoryLayout = new QHBoxLayout(directoryRow);
+    directoryLayout->setContentsMargins(0, 0, 0, 0);
+    directoryLayout->setSpacing(8);
+    auto *browse = new QPushButton(tr("浏览…"), directoryRow);
+    browse->setObjectName(QStringLiteral("browseRemoteDirectory"));
+    browse->setAutoDefault(false);
+    browse->setIcon(QIcon(QStringLiteral(":/resources/icon/setup/folder.svg")));
+    directoryLayout->addWidget(directory, 1);
+    directoryLayout->addWidget(browse);
+    form->addRow(tr("远程目录"), directoryRow);
     auto *directoryHint = new QLabel(tr("请输入家庭电脑上的目录，留空使用用户主目录。"), body);
     directoryHint->setObjectName(QStringLiteral("dialogDescription"));
     directoryHint->setWordWrap(true);
@@ -1054,6 +1097,32 @@ void WorkbenchWindow::editProject(bool add)
     buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
     footerLayout->addWidget(buttons);
     layout->addWidget(footer);
+    connect(browse, &QPushButton::clicked, &dialog,
+            [&, this]
+            {
+                const QString hostId = hostChoice->currentData().toString();
+                const auto found =
+                    std::find_if(m_state.hosts.cbegin(), m_state.hosts.cend(),
+                                 [&hostId](const HostProfile &host) { return host.id == hostId; });
+                if (found == m_state.hosts.cend())
+                {
+                    errorLabel->setText(tr("请先选择有效的家庭主机。"));
+                    errorLabel->show();
+                    return;
+                }
+                RemoteDirectoryDialog picker(*found, directory->text().trimmed(), &dialog);
+                if (picker.exec() != QDialog::Accepted)
+                    return;
+                const QString selected = picker.selectedPath();
+                if (selected.size() > directory->maxLength())
+                {
+                    errorLabel->setText(tr("所选路径超过项目目录长度上限，未替换原目录。"));
+                    errorLabel->show();
+                    return;
+                }
+                directory->setText(selected);
+                errorLabel->hide();
+            });
     launcher::Project savedProject;
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog,
@@ -1363,12 +1432,19 @@ void WorkbenchWindow::createTerminal(launcher::Project project, HostProfile host
                 status->setText(tr("正在校验主机…认证与 Claude 状态随后请查看终端。"));
                 updateTerminalLabel(page);
             });
+    connect(session, &SshSession::remoteHostResolved, page,
+            [this, page](const QString &host)
+            {
+                page->setProperty("sessionNetworkHost", host);
+                updateActiveSession();
+            });
     connect(session, &SshSession::started, page,
             [this, page, status]
             {
                 if (page->property("sessionClosing").toBool() || page->property("terminalFailed").toBool() ||
                     page->property("sessionExited").toBool())
                     return;
+                page->setProperty("sessionStarted", true);
                 page->setProperty("sessionState", tr("SSH 运行中"));
                 status->setText(
                     tr("SSH 进程运行中 · 仅确认本地进程已启动；认证与 Claude 是否就绪请查看终端。"));
@@ -1638,6 +1714,34 @@ void WorkbenchWindow::showFeedback(const QString &message, bool error)
 void WorkbenchWindow::updateActiveSession()
 {
     const auto *page = m_tabs->currentWidget();
+    QString tone = QStringLiteral("idle");
+    if (page)
+    {
+        if (page->property("sessionClosing").toBool())
+            tone = QStringLiteral("pending");
+        else if (page->property("terminalFailed").toBool() ||
+                 !page->property("sessionError").toString().isEmpty() ||
+                 (page->property("sessionExited").toBool() && page->property("sessionExitCode").toInt() != 0))
+            tone = QStringLiteral("error");
+        else if (page->property("sessionExited").toBool())
+            tone = QStringLiteral("idle");
+        else if (page->property("sessionStarted").toBool())
+            tone = QStringLiteral("running");
+        else if (!m_preview)
+            tone = QStringLiteral("pending");
+    }
+    m_statusLight->setProperty("tone", tone);
+    m_statusLight->style()->unpolish(m_statusLight);
+    m_statusLight->style()->polish(m_statusLight);
+    m_statusLight->update();
+    m_statusLight->setToolTip(
+        tr("绿：SSH 进程运行（不代表 Claude 就绪）；黄：准备或关闭；红：失败；灰：空闲或正常退出。"));
+    m_statusLight->setAccessibleName(m_host->text());
+    if (page && tone == QStringLiteral("running") && !m_preview && !m_closing)
+        m_ping->setTarget(page->property("sessionNetworkHost").toString(),
+                          page->property("sessionNumber").toString());
+    else
+        m_ping->stop();
     if (page)
     {
         const QString state = page->property("sessionClosing").toBool()

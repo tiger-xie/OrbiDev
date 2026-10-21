@@ -16,6 +16,7 @@ class QSplitter;
 
 namespace sshworkbench
 {
+class PingService;
 // 窗口只编排项目编辑与会话；所有方法均在界面线程调用。
 class WorkbenchWindow final : public QMainWindow
 {
@@ -91,6 +92,9 @@ private:
     bool m_profileReady = false;
     bool m_renderingProjects = false;
     QLabel *m_host = nullptr;
+    QLabel *m_statusLight = nullptr;
+    QLabel *m_latency = nullptr;
+    PingService *m_ping = nullptr;
     QLabel *m_feedback = nullptr;
     QLabel *m_summary = nullptr;
     QListWidget *m_projects = nullptr;

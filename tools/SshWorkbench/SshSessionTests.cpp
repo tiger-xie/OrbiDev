@@ -179,12 +179,17 @@ private slots:
         QVERIFY(temporary.isValid());
         const QString directory = temporary.filePath(QStringLiteral("中文’;$();[目录]"));
         QVERIFY(QDir().mkpath(directory));
+        QFile sentinel(QDir(directory).filePath(QStringLiteral("expected-working-directory.txt")));
+        QVERIFY(sentinel.open(QIODevice::WriteOnly));
+        sentinel.close();
         const QString marker = temporary.filePath(QStringLiteral("started.txt"));
         QFile fake(temporary.filePath(QStringLiteral("claude.cmd")));
         QVERIFY(fake.open(QIODevice::WriteOnly));
-        fake.write((QStringLiteral("@echo off\r\necho invoked > \"") + marker +
-                    QStringLiteral("\"\r\nexit /b 0\r\n"))
-                       .toLocal8Bit());
+        fake.write(
+            (QStringLiteral(
+                 "@echo off\r\nif not exist expected-working-directory.txt exit /b 42\r\necho invoked > \"") +
+             marker + QStringLiteral("\"\r\nexit /b 0\r\n"))
+                .toLocal8Bit());
         fake.close();
         auto environment = QProcessEnvironment::systemEnvironment();
         // 将测试替身放到 PATH 首位；不会启动用户安装的 Claude。
@@ -206,6 +211,15 @@ private slots:
         QVERIFY(process.waitForFinished(10000));
         QVERIFY(process.exitCode() != 0);
         QVERIFY(!QFile::exists(marker));
+        for (const QString &invalid : {sentinel.fileName(), QStringLiteral("HKCU:\\Software")})
+        {
+            QVERIFY(remoteCommandArguments(invalid, arguments, error));
+            arguments.removeFirst();
+            process.start(powershell(), arguments);
+            QVERIFY(process.waitForFinished(10000));
+            QVERIFY(process.exitCode() != 0);
+            QVERIFY(!QFile::exists(marker));
+        }
     }
     void fakeCliRoundTripResizeAndExit()
     {

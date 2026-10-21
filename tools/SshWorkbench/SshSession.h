@@ -32,6 +32,8 @@ public:
 
 signals:
     void hostVerificationStarted();
+    // 严格校验后报告 SSH 实际目标，始终先于 started；仅用于当前会话的网络探测。
+    void remoteHostResolved(const QString &host);
     void started();
     void outputReady(const QByteArray &bytes);
     void errorOccurred(const QString &message);
